@@ -9,8 +9,8 @@ coding agents like [abtop](https://github.com/abtop-dev/abtop).
 ```
 ┌ CPU ───────────────────────────┐┌ GPU ───────────────────────────┐┌ AI AGENTS ─────────────────────┐
 │ 36.4%  4.82 GHz  63°C          ││ GPU0 RTX 5090  80%  58°C 315W  ││ 4 sessions · 2 active · 1.9k/s │
-│          ⢀⣀⣠⣴⣶⣿⣿⣿⣿⣶⣦⣄⡀        ││          ⢀⣀⣠⣴⣶⣿⣿⣿⣶⣦⣄⡀      ││ ● CC vector-db  ctx ███░░ 63%  │
-│  core bars, load average       ││ VRAM bar + utilisation graph  ││ ◐ CX vlm-bench  ctx ██░░░ 41%  │
+│          ⢀⣀⣠⣴⣶⣿⣿⣿⣿⣶⣦⣄⡀      ││          ⢀⣀⣠⣴⣶⣿⣿⣿⣶⣦⣄⣀⡀      ││ ● CC vector-db  ctx ███░░ 63%  │
+│  core bars, load average       ││ VRAM bar + utilisation graph   ││ ◐ CX vlm-bench  ctx ██░░░ 41%  │
 └────────────────────────────────┘└────────────────────────────────┘└────────────────────────────────┘
 ```
 
