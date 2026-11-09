@@ -4,7 +4,7 @@ A single terminal dashboard that looks like [btop](https://github.com/aristocrat
 shows NVIDIA GPUs like [nvitop](https://github.com/XuehaiPan/nvitop), and tracks local AI
 coding agents like [abtop](https://github.com/abtop-dev/abtop).
 
-![envitop dashboard showing CPU, memory, network, disk, GPU processes, tokens and active agents](docs/envitop-screenshot.png)
+![envitop dashboard showing CPU, memory, network, disk, GPU processes, tokens and active agents](docs/envitop-demo.svg)
 
 ```
 ┌ CPU ──────────────────────┐┌ GPU ──────────────────────────┐┌ AI AGENTS ─────────────────────┐
