@@ -49,6 +49,7 @@ class SystemCollector:
         self._freq = 0.0
         self._proc_cache: list[ProcInfo] = []
         self._proc_index: dict[int, ProcInfo] = {}
+        self._logical_cpus = max(1, psutil.cpu_count(logical=True) or 1)
         self.hostname = socket.gethostname()
         self.username = _read_first("/proc/self/loginuid") == "4294967295" and "" or os.environ.get("USER", "")
         if not self.username:
@@ -256,12 +257,13 @@ class SystemCollector:
                     cmdline = [cmdline]
                 cmd = " ".join(cmdline)
                 rss = int(getattr(info.get("memory_info"), "rss", 0) or 0)
+                cpu_pct = float(info.get("cpu_percent") or 0.0) / self._logical_cpus
                 result.append(
                     ProcInfo(
                         pid=int(info.get("pid") or 0),
                         name=str(info.get("name") or "?"),
                         user=str(info.get("username") or ""),
-                        cpu=float(info.get("cpu_percent") or 0.0),
+                        cpu=max(0.0, min(100.0, cpu_pct)),
                         mem_pct=float(info.get("memory_percent") or 0.0),
                         rss=rss,
                         cmd=cmd[:400],

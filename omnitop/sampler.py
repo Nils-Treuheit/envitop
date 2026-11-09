@@ -109,6 +109,8 @@ class Sampler(threading.Thread):
                     disk=disk,
                     gpu=gpu_state,
                     procs=procs,
+                    task_count=len(index),
+                    thread_count=sum(p.threads for p in index.values()),
                     agents=list(self._sessions),
                     quotas=list(self._quotas),
                     token_rate=self._token_rate,
@@ -198,13 +200,14 @@ class Sampler(threading.Thread):
                         else:
                             self._gpu_empty_process_samples = 0
                     driver = state.driver or self.gpu.refresh_driver()
+                    cuda = state.cuda or self.gpu.refresh_cuda()
                     detailed = GpuState(
                         available=state.available,
                         error=state.error,
                         gpus=state.gpus,
                         processes=processes,
                         driver=driver,
-                        cuda=state.cuda,
+                        cuda=cuda,
                     )
                     with self._lock:
                         self._gpu_state = detailed

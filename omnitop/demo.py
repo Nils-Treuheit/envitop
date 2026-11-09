@@ -320,8 +320,8 @@ class DemoSource:
             ),
         ]
         procs = [
-            ProcInfo(61204, "python3", "nils", 412.3, 14.2, int(4.1 * GB), "python -m train.ddp --config configs/large.toml", ppid=1, gpu_index=0, gpu_sm=82, gpu_mem_pct=54),
-            ProcInfo(73912, "codex", "nils", 88.7, 3.1, int(1.2 * GB), "codex exec --full-auto", ppid=4211, gpu_index=0, gpu_sm=47, gpu_mem_pct=32),
+            ProcInfo(61204, "python3", "nils", 17.2, 14.2, int(4.1 * GB), "python -m train.ddp --config configs/large.toml", ppid=1, gpu_index=0, gpu_sm=82, gpu_mem_pct=54),
+            ProcInfo(73912, "codex", "nils", 3.7, 3.1, int(1.2 * GB), "codex exec --full-auto", ppid=4211, gpu_index=0, gpu_sm=47, gpu_mem_pct=32),
             ProcInfo(81900, "opencode", "nils", 31.2, 2.0, int(0.9 * GB), "opencode", ppid=1),
             ProcInfo(4120, "firefox", "nils", 22.8, 6.4, int(2.8 * GB), "firefox --new-window", ppid=1),
             ProcInfo(9412, "gnome-shell", "nils", 18.4, 2.1, int(0.8 * GB), "gnome-shell --mode=user", ppid=1),
@@ -344,6 +344,8 @@ class DemoSource:
             disk=disk,
             gpu=gpu,
             procs=procs,
+            task_count=len(procs),
+            thread_count=sum(max(1, p.threads) for p in procs),
             agents=agents,
             quotas=quotas,
             token_rate=max(0, token_rate),

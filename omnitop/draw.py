@@ -125,6 +125,29 @@ PALETTES: dict[str, Palette] = {
         selected_bg="#22303f",
         graph=("#a3be8c", "#88c0d0", "#ebcb8b", "#bf616a"),
     ),
+    # btop's Adapta palette (theme file: adapta.theme). Its main background
+    # is intentionally terminal-default; use the app's dark panel surface.
+    "adapta": Palette(
+        name="adapta",
+        bg="#070b10",
+        panel="#0b1219",
+        border="#00bcd4",
+        border_focus="#00bcd4",
+        text="#cfd8dc",
+        dim="#809098",
+        faint="#505050",
+        accent="#90a4ae",
+        green="#00bcd4",
+        cyan="#00bcd4",
+        blue="#00b0ff",
+        yellow="#d4d400",
+        orange="#ff8040",
+        red="#ff0040",
+        magenta="#991199",
+        selected_bg="#bb0040",
+        selected_fg="#ffffff",
+        graph=("#00bcd4", "#d4d400", "#ff0040", "#ff0040"),
+    ),
 }
 
 PALETTE_ORDER = list(PALETTES)
@@ -366,6 +389,7 @@ def braille_graph(
     empty_bg: bool = True,
     color_by: str = "value",
     solid_color: Optional[str] = None,
+    invert: bool = False,
 ) -> list[Text]:
     """Render a filled btop-like braille area graph.
 
@@ -399,10 +423,10 @@ def braille_graph(
             if level <= 0:
                 continue
             for d in range(level):
-                cell_row = height - 1 - (d // 4)
-                # d counts from the graph baseline upward, while Braille
-                # dot numbering counts from the character's top downward.
-                dot = 3 - (d % 4)
+                cell_row = d // 4 if invert else height - 1 - (d // 4)
+                # Normal graphs fill upward from the bottom baseline. Mirrored
+                # graphs fill downward from the top, including Braille dot order.
+                dot = d % 4 if invert else 3 - (d % 4)
                 # Braille ordering: dots 1,2,3,7 on the left and 4,5,6,8
                 # on the right (bits 0x01,0x02,0x04,0x40 / 0x08..0x80).
                 if dot == 3:
@@ -441,6 +465,7 @@ def braille_line_graph(
     maximum: Optional[float] = None,
     color_by: str = "value",
     solid_color: Optional[str] = None,
+    invert: bool = False,
 ) -> list[Text]:
     """Render a connected Braille trace instead of a filled dot field."""
     width = max(1, int(width))
@@ -460,10 +485,10 @@ def braille_line_graph(
         ]
     maximum = max(maximum if maximum is not None else max(vals), 1e-9)
     dot_height = height * 4
-    points = [
-        (x, dot_height - 1 - int(round(max(0.0, min(1.0, value / maximum)) * (dot_height - 1))))
-        for x, value in enumerate(vals)
-    ]
+    points = []
+    for x, value in enumerate(vals):
+        level = int(round(max(0.0, min(1.0, value / maximum)) * (dot_height - 1)))
+        points.append((x, level if invert else dot_height - 1 - level))
     cells = [[0] * height for _ in range(width)]
 
     def plot(x: int, y: int) -> None:

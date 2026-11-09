@@ -89,17 +89,22 @@ class GpuProcess:
     name: str
     kind: str = "C"  # C = compute, G = graphics
     sm: Optional[float] = None
-    mem_pct: Optional[float] = None
-    vram: int = 0  # bytes
+    gmbw_pct: Optional[float] = None  # per-process GPU memory-bandwidth activity
+    vram: Optional[int] = None  # bytes; None when the per-process allocation is unavailable
     user: str = ""
+    runtime_s: Optional[float] = None
+    cpu_pct: Optional[float] = None  # host CPU share, normalized to total machine capacity
+    host_mem_pct: Optional[float] = None  # process share of host RAM
+    rss: int = 0  # host resident memory, bytes
+    cmd: str = ""
 
     @property
     def sm_display(self) -> str:
         return "  -" if self.sm is None else f"{self.sm:3.0f}"
 
     @property
-    def mem_display(self) -> str:
-        return "  -" if self.mem_pct is None else f"{self.mem_pct:3.0f}"
+    def gmbw_display(self) -> str:
+        return "  -" if self.gmbw_pct is None else f"{self.gmbw_pct:3.0f}"
 
 
 @dataclass
@@ -252,6 +257,8 @@ class Snapshot:
     disk: DiskInfo = field(default_factory=DiskInfo)
     gpu: GpuState = field(default_factory=GpuState)
     procs: list[ProcInfo] = field(default_factory=list)
+    task_count: int = 0
+    thread_count: int = 0
     agents: list[AgentSession] = field(default_factory=list)
     quotas: list[RateLimit] = field(default_factory=list)
     token_rate: float = 0.0

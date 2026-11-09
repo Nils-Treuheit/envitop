@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import time
 from typing import Iterable, Optional, Sequence
 
@@ -10,6 +11,7 @@ from rich.text import Text
 from textual.widget import Widget
 
 from .draw import (
+    blend,
     braille_graph,
     braille_line_graph,
     clip,
@@ -67,6 +69,118 @@ def _bar_text(pct: Optional[float], width: int, palette, selected: bool = False)
     return pct_bar(pct, width, palette, style=style)
 
 
+def _context_bar(
+    pct: Optional[float],
+    width: int,
+    palette,
+    *,
+    selected: bool = False,
+    fill_pct: Optional[float] = None,
+) -> Text:
+    """Render a full-width meter with a green-to-red usage color."""
+    width = max(0, width)
+    text = Text()
+    background = f"on {palette.selected_bg}" if selected else ""
+    if not width:
+        return text
+    if pct is None:
+        text.append("·" * width, style=f"{background} {palette.faint}".strip())
+        return text
+    pct = max(0.0, min(100.0, pct))
+    stops = ("#5ee08a", "#a3e635", "#f5d76e", "#ffa657", "#ff6b6b")
+    position = pct / 100 * (len(stops) - 1)
+    index = min(len(stops) - 2, int(position))
+    color = blend(stops[index], stops[index + 1], position - index)
+    filled = max(0.0, min(100.0, pct if fill_pct is None else fill_pct)) / 100 * width
+    full = min(width, int(filled))
+    text.append("█" * full, style=f"{background} {color}".strip())
+    remainder = width - full
+    fraction = int((filled - full) * 8)
+    partial = " ▏▎▍▌▋▊▉"
+    if remainder and fraction:
+        text.append(partial[fraction], style=f"{background} {color}".strip())
+        remainder -= 1
+    if remainder:
+        text.append("░" * remainder, style=f"{background} {palette.faint}".strip())
+    return text
+
+
+def _process_usage_color(pct: Optional[float], palette) -> str:
+    """Use green below 30%, warning colors from 30–49%, and red at 50%."""
+    if pct is None:
+        return palette.faint
+    pct = max(0.0, min(100.0, pct))
+    if pct >= 50:
+        return palette.red
+    if pct >= 30:
+        return blend(palette.yellow, palette.orange, (pct - 30) / 20)
+    return palette.green
+
+
+def _gpu_memory(value: int) -> str:
+    """Format framebuffer memory with nvitop-like precision."""
+    gib = 1024**3
+    mib = 1024**2
+    if value >= gib:
+        return f"{value / gib:.2f}GiB"
+    if value >= mib:
+        return f"{value / mib:.1f}MiB"
+    return f"{value / 1024:.1f}KiB" if value >= 1024 else f"{value}B"
+
+
+def _llama_model(command: str) -> str:
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        args = command.split()
+    model = ""
+    for index, arg in enumerate(args):
+        if arg == "--model" and index + 1 < len(args):
+            model = args[index + 1]
+            break
+        if arg.startswith("--model="):
+            model = arg.partition("=")[2]
+            break
+    if not model:
+        return "?"
+    model = model.removeprefix("hf://")
+    marker = "huggingface.co/"
+    if marker in model:
+        model = model.split(marker, 1)[1]
+        components = model.split("/")
+        if len(components) >= 2:
+            model = "/".join(components[:2])
+    for component in model.replace("\\", "/").split("/"):
+        if component.startswith("models--"):
+            repo = component.removeprefix("models--")
+            organization, separator, name = repo.partition("--")
+            if separator and organization and name:
+                return f"{organization}/{name}"
+    model = model.rstrip("/")
+    if "/" in model and (model.startswith("/") or model.startswith(".")):
+        model = model.rsplit("/", 1)[-1]
+    for extension in (".gguf", ".safetensors", ".bin"):
+        if model.endswith(extension):
+            model = model[: -len(extension)]
+            break
+    return model or "?"
+
+
+def _gpu_process_details(proc, active_projects: Sequence[str]) -> str:
+    command = proc.cmd or proc.name
+    lower = f"{proc.name} {command}".lower()
+    if "llama-server" in lower or "llama_server" in lower:
+        return f"M:{_llama_model(command)}"
+    ai_app = any(
+        name in lower
+        for name in ("chatgpt", "claude", "codex", "opencode", "aider", "cursor", "copilot", "gemini")
+    )
+    if not ai_app:
+        return ""
+    projects = list(dict.fromkeys(project.strip() for project in active_projects if project.strip()))
+    return "P:[" + ",".join(projects) + "]"
+
+
 class OneLine(Widget):
     """A single-line text area that never wraps or overflows its panel."""
 
@@ -115,6 +229,7 @@ class HistoryGraph(Widget):
         graph_style: str = "filled",
         primary_label: str = "",
         secondary_label: str = "",
+        secondary_invert: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -128,6 +243,7 @@ class HistoryGraph(Widget):
         self.graph_style = graph_style
         self.primary_label = primary_label
         self.secondary_label = secondary_label
+        self.secondary_invert = secondary_invert
 
     def update_data(
         self,
@@ -158,8 +274,12 @@ class HistoryGraph(Widget):
         h = max(1, self.size.height)
         if self.secondary and h >= 2:
             maximum = self._combined_max()
-            show_labels = h >= 4 and (self.primary_label or self.secondary_label)
-            graph_height = h - (2 if show_labels else 0)
+            show_labels = h >= 5 and (self.primary_label or self.secondary_label)
+            show_divider = h >= 3
+            label_rows = int(show_labels and bool(self.primary_label)) + int(
+                show_labels and bool(self.secondary_label)
+            )
+            graph_height = h - label_rows - int(show_divider)
             top_h = max(1, graph_height // 2)
             bottom_h = max(1, graph_height - top_h)
             primary_colour = getattr(palette, self.primary_role, palette.accent)
@@ -177,9 +297,9 @@ class HistoryGraph(Widget):
                 color_by=self.color_mode,
                 solid_color=primary_colour if self.color_mode != "value" else None,
             ))
-            if show_labels and self.secondary_label:
-                lines.append(Text(self.secondary_label, style=secondary_colour))
-            lines += graph_fn(
+            if show_divider:
+                lines.append(Text("─" * w, style=palette.faint))
+            lines.extend(graph_fn(
                 self.secondary,
                 w,
                 bottom_h,
@@ -187,7 +307,10 @@ class HistoryGraph(Widget):
                 maximum=self.secondary_maximum or maximum,
                 color_by=self.color_mode,
                 solid_color=secondary_colour if self.color_mode != "value" else None,
-            )
+                invert=self.secondary_invert,
+            ))
+            if show_labels and self.secondary_label:
+                lines.append(Text(self.secondary_label, style=secondary_colour))
             return _join(lines, w, h)
         graph_fn = braille_line_graph if self.graph_style == "line" else braille_graph
         lines = graph_fn(self.values, w, h, palette, maximum=self.maximum, color_by=self.color_mode)
@@ -231,10 +354,10 @@ class CoreBars(Widget):
         cell = 14
         cols = max(1, w // cell)
         rows_needed = (len(cores) + cols - 1) // cols
-        temp_label = self.temp_source.upper() if self.temperatures and self.temp_source else "TEMP"
+        temp_label = "CCD" if self.temp_source.upper() == "CCD" else "TMP"
         header = Text()
         for _ in range(cols):
-            header.append(f"{'CORE % ' + temp_label:<{cell}}", style=palette.dim)
+            header.append(f"{'CORE':<4} {'%':>4} {temp_label:<3} ", style=palette.dim)
         lines: list[Text] = [header]
         for row in range(min(max(0, h - 1), rows_needed)):
             line = Text()
@@ -245,11 +368,13 @@ class CoreBars(Widget):
                     continue
                 pct = cores[idx]
                 temp = self.temperatures[idx] if idx < len(self.temperatures) else None
-                temp_text = f" {temp:.0f}°" if temp is not None else ""
-                line.append(f"C{idx:<2} ", style=palette.dim)
+                temp_text = f"{temp:.0f}°" if temp is not None else ""
+                line.append(f"C{idx:<3}", style=palette.dim)
+                line.append(" ")
                 line.append(f"{pct:3.0f}%", style=f"bold {palette.gradient(pct)}")
+                line.append(" ")
                 line.append(temp_text, style=palette.orange if temp is not None else palette.dim)
-                padding = cell - 4 - len(f"{pct:3.0f}%") - len(temp_text)
+                padding = cell - 4 - 1 - 4 - 1 - len(temp_text)
                 if padding > 0:
                     line.append(" " * padding)
             lines.append(_pad_text(line, w))
@@ -288,7 +413,11 @@ class GpuPanel(Widget):
             this_band = band if gi < n - 1 else max(2, h - band * (n - 1))
             stats_lines = 2 if this_band >= 5 else 1
             show_graph_labels = this_band >= 8
-            graph_h = max(1, this_band - stats_lines - (2 if show_graph_labels else 0))
+            show_divider = this_band - stats_lines - (2 if show_graph_labels else 0) >= 3
+            graph_h = max(
+                1,
+                this_band - stats_lines - (2 if show_graph_labels else 0) - int(show_divider),
+            )
             util_colour = palette.gradient(gpu.util)
             title = Text()
             title.append(f"GPU{gpu.index} ", style=f"bold {palette.accent}")
@@ -304,6 +433,11 @@ class GpuPanel(Widget):
                 if title.cell_len + cell_len(part) <= w:
                     title.append(part, style=style)
 
+            if state.driver or state.cuda:
+                version = "  Driver " + (state.driver or "—")
+                if state.cuda:
+                    version += " | CUDA " + state.cuda
+                add(version, palette.dim)
             if gpu.temp_c is not None:
                 add(f"  {gpu.temp_c:.0f}°C", palette.text)
             if gpu.power_w is not None:
@@ -321,22 +455,16 @@ class GpuPanel(Widget):
 
             if stats_lines == 2:
                 vram = f"{human_bytes(gpu.mem_used)}/{human_bytes(gpu.mem_total)}"
-                second: list[tuple[str, str]] = [
-                    ("VRAM ", palette.dim),
-                ]
-                second_text = tiny_bar(gpu.mem_percent, max(4, min(14, w // 4)), palette)
-                # Compose the bar as a separate Text so styles survive.
-                prefix = _line(second, 5)
-                bar = second_text
-                suffix = _line(
-                    [
-                        (f" {gpu.mem_percent:3.0f}%  {vram}", palette.dim),
-                    ],
-                    max(0, w - 5 - bar.cell_len),
-                )
+                prefix = _line([("VRAM ", palette.dim)], 5)
+                suffix_text = f" {gpu.mem_percent:3.0f}%  {vram}"
+                suffix_width = min(cell_len(suffix_text), max(0, w - prefix.cell_len))
+                bar_width = max(0, w - prefix.cell_len - suffix_width)
+                bar = tiny_bar(gpu.mem_percent, max(1, bar_width), palette)
+                suffix = _line([(suffix_text, palette.dim)], suffix_width)
                 row = Text()
                 row.append_text(prefix)
-                row.append_text(bar)
+                if bar_width:
+                    row.append_text(bar)
                 row.append_text(suffix)
                 row.truncate(w, overflow="crop")
                 lines.append(row)
@@ -355,8 +483,8 @@ class GpuPanel(Widget):
                 color_by="value",
             )
             lines.extend(graph)
-            if show_graph_labels:
-                lines.append(Text("VRAM", style=palette.dim))
+            if show_divider:
+                lines.append(Text("─" * w, style=palette.faint))
             lines.extend(
                 braille_graph(
                     smooth_series(gpu.mem_history),
@@ -367,6 +495,8 @@ class GpuPanel(Widget):
                     color_by="value",
                 )
             )
+            if show_graph_labels:
+                lines.append(Text("VRAM", style=palette.dim))
             if gi < n - 1:
                 # Replace the last line with a separator if the band is tiny.
                 if this_band <= 2:
@@ -536,13 +666,24 @@ class GpuProcTable(Widget):
         super().__init__(**kwargs)
         self.processes: list = []
         self.selected = 0
+        self.gpu_totals: dict[int, int] = {}
+        self.active_projects: list[str] = []
 
-    def update_data(self, processes, selected: int) -> None:
+    def update_data(self, processes, selected: int, gpus=(), active_projects=()) -> None:
         next_processes = list(processes)
-        if self.processes == next_processes and self.selected == selected:
+        next_totals = {gpu.index: gpu.mem_total for gpu in gpus}
+        next_projects = list(active_projects)
+        if (
+            self.processes == next_processes
+            and self.selected == selected
+            and self.gpu_totals == next_totals
+            and self.active_projects == next_projects
+        ):
             return
         self.processes = next_processes
         self.selected = selected
+        self.gpu_totals = next_totals
+        self.active_projects = next_projects
         self.refresh()
 
     def render(self) -> Text:
@@ -552,35 +693,73 @@ class GpuProcTable(Widget):
         if h <= 1:
             return Text("GPU processes", style=palette.dim)
         lines: list[Text] = []
+        remaining = max(0, w - 40)
+        natural_process_width = max(
+            8,
+            max((cell_len(proc.name or "?") for proc in self.processes), default=8),
+        )
+        show_details = remaining >= natural_process_width + 1 + 18
+        process_width = natural_process_width if show_details else remaining
+        details_width = remaining - process_width - 1 if show_details else 0
         header = [
-            ("PID", palette.dim), ("  G", palette.dim), (" T", palette.dim),
-            ("  SM%", palette.dim), (" MEM%", palette.dim), ("    VRAM", palette.dim),
-            ("  PROCESS", palette.dim),
+            (f"{'PID':<6}", palette.dim), (" ", palette.dim),
+            (f"{'G':>1}", palette.dim), (" ", palette.dim),
+            (f"{'T':>1}", palette.dim), (" ", palette.dim),
+            (f"{'SM%':>3}", palette.dim), (" ", palette.dim),
+            (f"{'GMBW%':>5}", palette.dim), (" ", palette.dim),
+            (f"{'VRAM':>9}", palette.dim), (" ", palette.dim),
+            (f"{'TIME':>8}", palette.dim), (" ", palette.dim),
+            (f"{'PROCESS':<{process_width}}", palette.dim),
         ]
+        if show_details:
+            header.extend([(" ", palette.dim), (f"{'DETAILS':<{details_width}}", palette.dim)])
         lines.append(_line(header, w))
         visible = max(1, h - 1)
-        selected = min(max(0, self.selected), max(0, len(self.processes) - 1))
-        start = max(0, selected - visible + 1)
-        if start > max(0, len(self.processes) - visible):
+        selected = self.selected if 0 <= self.selected < len(self.processes) else None
+        start = max(0, selected - visible + 1) if selected is not None else 0
+        if selected is not None and start > max(0, len(self.processes) - visible):
             start = max(0, len(self.processes) - visible)
         rows = self.processes[start : start + visible]
         for offset, proc in enumerate(rows):
             i = start + offset
             selected_row = i == selected
             base = f"on {palette.selected_bg} {palette.selected_fg}" if selected_row else ""
-            sm = "  -" if proc.sm is None else f"{proc.sm:3.0f}"
-            mem = "  -" if proc.mem_pct is None else f"{proc.mem_pct:3.0f}"
-            name_w = max(6, w - 7 - 3 - 2 - 5 - 5 - 8 - 2)
+            sm = "-" if proc.sm is None else f"{proc.sm:3.0f}"
+            gmbw = "-" if proc.gmbw_pct is None else f"{proc.gmbw_pct:5.0f}"
+            vram = _gpu_memory(proc.vram) if proc.vram is not None else "—"
+            gpu_total = self.gpu_totals.get(proc.gpu_index, 0)
+            vram_use = None
+            if proc.vram is not None and gpu_total > 0:
+                free_pct = max(0.0, gpu_total - proc.vram) / gpu_total * 100.0
+                vram_use = 100.0 - free_pct
+            runtime = "—"
+            if proc.runtime_s is not None:
+                seconds = int(proc.runtime_s)
+                hours, remainder = divmod(seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                runtime = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                if hours >= 100:
+                    runtime = f"{hours // 24}d{hours % 24:02d}:{minutes:02d}"
             parts = [
-                (f"{proc.pid:>6}", palette.dim if not selected_row else ""),
-                (f" {proc.gpu_index:>2}", palette.accent if not selected_row else ""),
-                (f" {proc.kind:>1}", palette.magenta if proc.kind == "G" else palette.green),
-                (f" {sm:>4}", palette.gradient(proc.sm or 0) if proc.sm else palette.faint),
-                (f" {mem:>4}", palette.gradient(proc.mem_pct or 0) if proc.mem_pct else palette.faint),
-                (f" {human_bytes(proc.vram):>7}", palette.text),
-                ("  ", ""),
-                (clip(proc.name, name_w), palette.text),
+                (f"{proc.pid:<6}", palette.dim if not selected_row else ""),
+                (" ", ""),
+                (f"{proc.gpu_index:>1}", palette.accent if not selected_row else ""),
+                (" ", ""),
+                (f"{proc.kind:>1}", palette.magenta if proc.kind == "G" else palette.green),
+                (" ", ""),
+                (f"{sm:>3}", _process_usage_color(proc.sm, palette)),
+                (" ", ""),
+                (f"{gmbw:>5}", _process_usage_color(proc.gmbw_pct, palette)),
+                (" ", ""),
+                (f"{vram:>9}", _process_usage_color(vram_use, palette)),
+                (" ", ""),
+                (f"{runtime:>8}", palette.dim),
+                (" ", ""),
+                (f"{clip(proc.name, process_width):<{process_width}}", palette.text),
             ]
+            if show_details:
+                details = _gpu_process_details(proc, self.active_projects)
+                parts.extend([(" ", ""), (clip(details, details_width), palette.text)])
             lines.append(_line(parts, w, base))
         return _join(lines, w, h)
 
@@ -609,19 +788,14 @@ class ProcTable(Widget):
         if h <= 1:
             return Text("processes", style=palette.dim)
         lines: list[Text] = []
-        lines.append(
-            _line(
-                [
-                    ("PID", palette.dim),
-                    (" USER", palette.dim),
-                    ("  CPU%", palette.dim),
-                    (" MEM%", palette.dim),
-                    ("    RSS", palette.dim),
-                    ("  COMMAND", palette.dim),
-                ],
-                w,
-            )
-        )
+        lines.append(_line([
+            (f"{'PID':<6}", palette.dim), (" ", palette.dim),
+            (f"{'USER':<10}", palette.dim), (" ", palette.dim),
+            (f"{'CPU%':>5}", palette.dim), (" ", palette.dim),
+            (f"{'MEM%':>5}", palette.dim), (" ", palette.dim),
+            (f"{'RSS':>6}", palette.dim), (" ", palette.dim),
+            ("Process", palette.dim),
+        ], w))
         visible = max(1, h - 1)
         selected = min(max(0, self.selected), max(0, len(self.processes) - 1))
         start = max(0, selected - visible + 1)
@@ -632,16 +806,20 @@ class ProcTable(Widget):
             i = start + offset
             selected_row = i == selected
             base = f"on {palette.selected_bg} {palette.selected_fg}" if selected_row else ""
-            cpu_colour = palette.gradient(min(100, proc.cpu))
-            mem_colour = palette.gradient(min(100, proc.mem_pct * 2))
-            cmd_w = max(8, w - 7 - 9 - 6 - 6 - 8 - 2)
+            cpu_colour = _process_usage_color(proc.cpu, palette)
+            mem_colour = _process_usage_color(proc.mem_pct, palette)
+            cmd_w = max(1, w - 37)
             parts = [
-                (f"{proc.pid:>6}", palette.dim),
-                (f" {clip(proc.user, 8):<8}", palette.text),
-                (f" {proc.cpu:>5.1f}", cpu_colour),
-                (f" {proc.mem_pct:>5.1f}", mem_colour),
-                (f" {human_bytes(proc.rss):>7}", palette.dim),
-                ("  ", ""),
+                (f"{proc.pid:<6}", palette.dim),
+                (" ", ""),
+                (f"{clip(proc.user, 10):<10}", palette.text),
+                (" ", ""),
+                (f"{proc.cpu:5.1f}", cpu_colour),
+                (" ", ""),
+                (f"{proc.mem_pct:5.1f}", mem_colour),
+                (" ", ""),
+                (f"{human_bytes(proc.rss):>6}", palette.dim),
+                (" ", ""),
                 (clip(proc.cmd or proc.name, cmd_w), palette.text if selected_row else palette.dim),
             ]
             lines.append(_line(parts, w, base))
@@ -692,7 +870,8 @@ class AgentTable(Widget):
             lines.append(Text("press a to include older sessions", style=palette.faint))
             return _join(lines, w, h)
 
-        visible_h = h - 1
+        show_header = h >= 3
+        visible_h = max(0, h - 1 - int(show_header))
         selected = min(max(0, self.selected), len(self.sessions) - 1)
         start = 0
         if selected >= visible_h:
@@ -702,7 +881,27 @@ class AgentTable(Widget):
         rows = self.sessions[start : start + visible_h]
 
         show_model = w >= 58
-        show_ctx = w >= 44
+        prefix_w = 6
+        pct_w, tokens_w, age_w = 4, 7, 7
+        tail_w = 1 + pct_w + 1 + tokens_w + 1 + age_w
+        if show_model:
+            project_w = max(8, min(20, int(w * 0.22)))
+            model_w = max(8, min(18, int(w * 0.18)))
+        else:
+            project_w = max(8, min(24, w - prefix_w - tail_w - 1 - 4))
+            model_w = 0
+        bar_w = max(1, w - prefix_w - project_w - 1 - (model_w + 1 if show_model else 0) - tail_w)
+        if show_header:
+            heading = Text(style=palette.faint)
+            heading.append("  AG  ")
+            heading.append(f"{'PROJECT':<{project_w}}")
+            heading.append(" ")
+            if show_model:
+                heading.append(f"{'MODEL':<{model_w}}")
+                heading.append(" ")
+            heading.append(f"{clip('CONTEXT', bar_w):<{bar_w}}")
+            heading.append(f" {'USE%':>{pct_w}} {'TOKENS':>{tokens_w}} {'AGE':>{age_w}}")
+            lines.append(_pad_text(heading, w))
         for offset, session in enumerate(rows):
             idx = start + offset
             is_sel = idx == selected
@@ -719,30 +918,31 @@ class AgentTable(Widget):
                 model = f"{model}·{session.effort}"
             age = human_ago(session.updated_at, time.time())
             tokens = human_tokens(session.total_tokens)
-            # Reserve: glyph(1) agent(3) spaces + age(7) tokens(7) ctx(12)
-            fixed = 1 + 1 + 3 + 1 + 8 + 7 + (12 if show_ctx else 0)
-            project_w = max(8, int((w - fixed) * 0.48)) if show_model else max(8, w - fixed)
-            model_w = max(6, w - fixed - project_w - 1) if show_model else 0
             row = Text(style=base)
             row.append(glyph, style=colour)
             row.append(" ")
-            row.append(session.agent_label, style=f"bold {agent_colour}")
+            row.append(f"{session.agent_label:<3}", style=f"bold {agent_colour}")
             row.append(" ")
-            row.append(clip(session.project or "?", project_w), style=f"bold {palette.text}" if is_sel else palette.text)
+            project = clip(session.project or "?", project_w)
+            row.append(f"{project:<{project_w}}", style=f"bold {palette.text}" if is_sel else palette.text)
             row.append(" ")
             if show_model:
-                row.append(clip(model, model_w), style=palette.magenta)
+                row.append(f"{clip(model, model_w):<{model_w}}", style=palette.magenta)
                 row.append(" ")
-            if show_ctx:
-                if session.context_pct is not None:
-                    row.append("ctx ", style=palette.dim)
-                    row.append_text(tiny_bar(session.context_pct, 5, palette, style=base))
-                    row.append(f" {session.context_pct:3.0f}% ", style=palette.dim)
-                else:
-                    row.append("ctx   —   ", style=palette.faint)
-            row.append(f"{tokens:>6}", style=palette.dim)
+            context_pct = session.context_pct
+            if session.context_window > 0:
+                context_pct = max(
+                    0.0,
+                    min(100.0, session.context_tokens / session.context_window * 100.0),
+                )
+            elif context_pct is not None:
+                context_pct = max(0.0, min(100.0, context_pct))
+            row.append_text(_context_bar(context_pct, bar_w, palette, selected=is_sel))
+            pct_text = f"{context_pct:3.0f}%" if context_pct is not None else "  —"
+            row.append(f" {pct_text:>{pct_w}}", style=palette.dim)
+            row.append(f" {tokens:>{tokens_w}}", style=palette.dim)
             row.append(" ")
-            row.append(f"{age:>7}", style=palette.faint if age != "now" else palette.green)
+            row.append(f"{age:>{age_w}}", style=palette.faint if age != "now" else palette.green)
             if row.cell_len < w:
                 row.append(" " * (w - row.cell_len))
             row.truncate(w, overflow="crop")
@@ -761,10 +961,13 @@ class TokenOverview(Widget):
         super().__init__(**kwargs)
         self.session: Optional[AgentSession] = None
         self.token_rate = 0.0
+        self.rate_history: list[float] = []
 
     def update_data(self, session: Optional[AgentSession], token_rate: float) -> None:
         self.session = session
         self.token_rate = token_rate
+        self.rate_history.append(max(0.0, token_rate * 60))
+        self.rate_history = self.rate_history[-120:]
         self.refresh()
 
     def render(self) -> Text:
@@ -785,35 +988,51 @@ class TokenOverview(Widget):
             ("CacheR", session.cache_read),
             ("CacheW", session.cache_write),
         )
-        bar_w = max(4, min(20, w - 20))
-        for label, value in rows:
-            if len(lines) >= h:
-                break
+        value_labels = [human_tokens(value) for _, value in rows]
+        value_w = max(1, *(len(value) for value in value_labels))
+        bar_w = max(1, w - 10 - 1 - value_w)
+        metric_rows = min(len(rows), max(0, h - 6)) if h >= 6 else 0
+        for label, value in rows[:metric_rows]:
             row = Text()
             row.append(f"{label:<8}: ", style=palette.dim)
-            pct = value / total * 100 if total else 0.0
-            row.append_text(pct_bar(pct, bar_w, palette))
-            row.append(f" {human_tokens(value)}", style=palette.text)
-            lines.append(_pad_text(row, w))
-        if h >= 7 and len(lines) < h:
-            values = session.token_history or [0]
-            graph = braille_graph(
-                values,
-                max(1, w - 14),
-                2,
-                palette,
-                maximum=max(values) * 1.1 or 1.0,
-                color_by="value",
+            relative = value / total * 100 if total else 0.0
+            row.append_text(
+                _context_bar(relative, bar_w, palette, fill_pct=relative * 0.88)
             )
-            trend = Text("tokens/turn ", style=palette.dim)
-            trend.append_text(graph[0])
-            lines.append(_pad_text(trend, w))
-            lines.append(_pad_text(graph[1], w))
-        if len(lines) < h:
+            row.append(f" {human_tokens(value):>{value_w}}", style=palette.text)
+            lines.append(_pad_text(row, w))
+        if h >= 6:
+            lines.append(_line([
+                ("Token rate · ", palette.dim),
+                (f"{human_tokens(self.token_rate * 60)}/min", f"bold {palette.green}"),
+            ], w))
+            graph_rows = h - len(lines) - 2  # divider and footer
+            rate_graph_h = (graph_rows + 1) // 2
+            turn_graph_h = graph_rows - rate_graph_h
+            rate_values = self.rate_history or [0.0]
+            lines.extend(braille_graph(
+                rate_values,
+                w,
+                rate_graph_h,
+                palette,
+                maximum=max(rate_values) * 1.1 or 1.0,
+                color_by="value",
+            ))
+            lines.append(Text("─" * w, style=palette.faint))
+            turn_values = session.token_history or [0]
+            lines.extend(braille_graph(
+                turn_values,
+                w,
+                turn_graph_h,
+                palette,
+                maximum=max(turn_values) * 1.1 or 1.0,
+                color_by="value",
+            ))
             avg = total / session.turn_count if session.turn_count else 0
             lines.append(_line([
+                ("Tokens/Turn · ", palette.dim),
                 (f"Turns: {session.turn_count}", palette.dim),
-                (f"   Avg: {human_tokens(avg)}/t", palette.dim),
+                (f"    Avg: {human_tokens(avg)}/t", palette.dim),
             ], w))
         return _join(lines, w, h)
 
@@ -1044,21 +1263,30 @@ class Header(Widget):
         if s is None:
             return Text("omnitop", style=f"bold {palette.accent}")
         if w < 88:
+            if s.gpu.gpus:
+                gpu = s.gpu.gpus[0]
+                gpu_fields = f"GPU {gpu.util:3.1f}% · VRAM {gpu.mem_percent:3.1f}%"
+            else:
+                gpu_fields = "GPU n/a · VRAM n/a"
             line = (
                 f"◆ omnitop  {s.hostname} · up {human_duration(s.uptime, short=True)} · "
-                f"cpu {s.cpu.percent:.0f}% · mem {s.mem.percent:.0f}%"
+                f"CPU {s.cpu.percent:3.1f}% · RAM {s.mem.percent:3.1f}% · "
+                f"{s.task_count} Tasks · {s.thread_count} Threads · {gpu_fields}"
             )
-            if s.gpu.gpus:
-                line += f" · gpu {s.gpu.gpus[0].util:.0f}%"
             line += f" · agents {sum(1 for a in s.agents if a.is_active)}/{len(s.agents)}"
             return _line([(clip(line, w), palette.text)], w)
         info1 = (
             f"{s.hostname}  ·  {s.username}  ·  up {human_duration(s.uptime, short=True)}  ·  "
             f"{s.os_name}"
         )
-        gpu = f"GPU {s.gpu.gpus[0].util:.0f}%" if s.gpu.gpus else "GPU n/a"
+        if s.gpu.gpus:
+            gpu_info = s.gpu.gpus[0]
+            gpu = f"GPU {gpu_info.util:3.1f}%  ·  VRAM {gpu_info.mem_percent:3.1f}%"
+        else:
+            gpu = "GPU n/a  ·  VRAM n/a"
         info2 = (
-            f"CPU {s.cpu.percent:4.1f}%  ·  MEM {s.mem.percent:4.1f}%  ·  {gpu}  ·  "
+            f"CPU {s.cpu.percent:4.1f}%  ·  RAM {s.mem.percent:4.1f}%  ·  "
+            f"{s.task_count} Tasks  ·  {s.thread_count} Threads  ·  {gpu}  ·  "
             f"AGENTS {sum(1 for a in s.agents if a.is_active)}/{len(s.agents)}  ·  "
             f"{human_tokens(s.token_rate)} tok/s  ·  {time.strftime('%H:%M:%S')}"
         )

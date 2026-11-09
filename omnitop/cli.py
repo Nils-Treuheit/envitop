@@ -40,6 +40,8 @@ def collect_once(scope: str = "recent"):
         disk=disk,
         gpu=gpu_state,
         procs=procs,
+        task_count=len(index),
+        thread_count=sum(p.threads for p in index.values()),
         agents=sessions,
         quotas=quotas,
         token_rate=0.0,
@@ -82,9 +84,17 @@ def _print_snapshot(snapshot) -> None:
                 f"{gpu.temp_c or 0:.0f}°C  {gpu.power_w or 0:.0f}W"
             )
         for proc in snapshot.gpu.processes[:8]:
+            runtime = "—"
+            if proc.runtime_s is not None:
+                seconds = int(proc.runtime_s)
+                hours, remainder = divmod(seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                runtime = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             print(
                 f"  gpuproc pid={proc.pid:<7} sm={proc.sm_display}% "
-                f"mem={proc.mem_display}% vram={human_bytes(proc.vram)} {proc.name}"
+                f"gmbw={proc.gmbw_display}% "
+                f"vram={human_bytes(proc.vram) if proc.vram is not None else '—'} "
+                f"time={runtime} {proc.name}"
             )
     else:
         print(f"GPU  unavailable ({snapshot.gpu.error})")
@@ -126,7 +136,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument(
         "--theme",
-        choices=["btop", "dracula", "gruvbox", "nord"],
+        choices=["btop", "dracula", "gruvbox", "nord", "adapta"],
         default="btop",
         help="colour theme",
     )

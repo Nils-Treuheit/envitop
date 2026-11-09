@@ -22,7 +22,7 @@ from .draw import (
     smooth_series,
     truncate_middle,
 )
-from .model import AgentSession, Snapshot
+from .model import AgentSession, ProcInfo, Snapshot
 from .sampler import Sampler
 from .widgets import (
     AgentTable,
@@ -194,6 +194,8 @@ class OmniTop(App):
         self.agent_index = 0
         self.gpu_proc_index = 0
         self.proc_index = 0
+        self._displayed_gpu_processes = []
+        self._displayed_procs: list[ProcInfo] = []
         self.proc_sort = "cpu"
         self.scope = scope
         self.paused = False
@@ -240,8 +242,9 @@ class OmniTop(App):
                         color_mode="value",
                         primary_role="green",
                         secondary_role="cyan",
-                        primary_label="RX ↓",
-                        secondary_label="TX ↑",
+                        primary_label="TX ↑",
+                        secondary_label="RX ↓",
+                        secondary_invert=True,
                     )
                 with Vertical(id="panel-disk", classes="panel"):
                     yield DiskPanel(id="disk-panel")
@@ -418,10 +421,20 @@ class OmniTop(App):
             if self.source:
                 self.source.set_selected(session.session_id)
             self._last_agent_key = (session.agent, session.session_id)
-        elif area == "gpuprocs" and snap.gpu.processes:
-            self.gpu_proc_index = (self.gpu_proc_index + delta) % len(snap.gpu.processes)
-        elif area == "procs" and snap.procs:
-            self.proc_index = (self.proc_index + delta) % len(snap.procs)
+        elif area == "gpuprocs" and self._displayed_gpu_processes:
+            self.gpu_proc_index = (self.gpu_proc_index + delta) % len(self._displayed_gpu_processes)
+            pid = self._displayed_gpu_processes[self.gpu_proc_index].pid
+            self.proc_index = next(
+                (i for i, proc in enumerate(self._displayed_procs) if proc.pid == pid),
+                self.proc_index,
+            )
+        elif area == "procs" and self._displayed_procs:
+            self.proc_index = (self.proc_index + delta) % len(self._displayed_procs)
+            pid = self._displayed_procs[self.proc_index].pid
+            self.gpu_proc_index = next(
+                (i for i, proc in enumerate(self._displayed_gpu_processes) if proc.pid == pid),
+                -1,
+            )
         self.refresh_ui()
 
     # -- actions ---------------------------------------------------------
@@ -441,13 +454,13 @@ class OmniTop(App):
             if s.pid in (1, os.getpid()):
                 return None
             return (f"agent {s.agent_label}", s.pid, f"{s.agent} {s.project}")
-        if self.focus_area == "gpuprocs" and snap.gpu.processes:
-            p = snap.gpu.processes[self.gpu_proc_index]
+        if self.focus_area == "gpuprocs" and 0 <= self.gpu_proc_index < len(self._displayed_gpu_processes):
+            p = self._displayed_gpu_processes[self.gpu_proc_index]
             if p.pid in (1, os.getpid()):
                 return None
             return ("gpu process", p.pid, p.name)
-        if self.focus_area == "procs" and snap.procs:
-            p = snap.procs[self.proc_index]
+        if self.focus_area == "procs" and 0 <= self.proc_index < len(self._displayed_procs):
+            p = self._displayed_procs[self.proc_index]
             if p.pid in (1, os.getpid()):
                 return None
             return ("process", p.pid, p.name)
@@ -612,6 +625,16 @@ class OmniTop(App):
         snap = self._snapshot()
         self._last_snapshot = snap
         palette = get_palette()
+        previous_gpu_pid = (
+            self._displayed_gpu_processes[self.gpu_proc_index].pid
+            if 0 <= self.gpu_proc_index < len(self._displayed_gpu_processes)
+            else None
+        )
+        previous_proc_pid = (
+            self._displayed_procs[self.proc_index].pid
+            if 0 <= self.proc_index < len(self._displayed_procs)
+            else None
+        )
 
         # Keep the selected session stable across refreshes.
         if snap.agents:
@@ -640,18 +663,23 @@ class OmniTop(App):
 
         # CPU.
         cpu = snap.cpu
-        temp = f"  {cpu.temp_c:.0f}°C" if cpu.temp_c is not None else ""
-        freq = f"{cpu.freq_mhz / 1000:.2f} GHz" if cpu.freq_mhz else "—"
-        cpu_stats = Text()
-        cpu_stats.append(clip(cpu.model_name, 24), style=f"bold {palette.text}")
-        cpu_stats.append(f"  CPU {cpu.percent:4.0f}%", style=f"bold {palette.gradient(cpu.percent)}")
-        cpu_stats.append(f"  {freq}", style=palette.text)
-        cpu_stats.append(temp, style=palette.orange)
-        cpu_stats.append(
+        cpu_widget = self.query_one("#cpu-stats", OneLine)
+        cpu_right = Text()
+        cpu_right.append(f"CPU {cpu.percent:4.0f}%", style=f"bold {palette.gradient(cpu.percent)}")
+        if cpu.temp_c is not None:
+            cpu_right.append(f"  {cpu.temp_c:.0f}°C", style=palette.orange)
+        cpu_right.append(
             f"  load {cpu.load1:.2f} {cpu.load5:.2f} {cpu.load15:.2f}",
             style=palette.dim,
         )
-        self.query_one("#cpu-stats", OneLine).update_text(cpu_stats)
+        stats_width = cpu_widget.size.width or 72
+        cpu_name = Text(clip(cpu.model_name, max(1, stats_width - cpu_right.cell_len - 1)),
+                        style=f"bold {palette.text}")
+        cpu_stats = Text()
+        cpu_stats.append_text(cpu_name)
+        cpu_stats.append(" " * max(1, stats_width - cpu_name.cell_len - cpu_right.cell_len))
+        cpu_stats.append_text(cpu_right)
+        cpu_widget.update_text(cpu_stats)
         self.query_one("#cpu-graph", HistoryGraph).update_data(
             cpu.user_history, maximum=100, secondary=cpu.history
         )
@@ -665,13 +693,14 @@ class OmniTop(App):
         mem_stats = Text()
         mem_stats.append(f"{mem.percent:5.1f}%", style=f"bold {palette.gradient(mem.percent)}")
         mem_stats.append(f"  {human_bytes(mem.used)} / {human_bytes(mem.total)}", style=palette.text)
+        swap_text = (
+            f"SWAP {human_bytes(mem.swap_used)}/{human_bytes(mem.swap_total)}"
+            if mem.swap_total
+            else "SWAP off"
+        )
+        mem_stats.append(f"  {swap_text}", style=palette.magenta)
         mem_stats.append(f"  avail {human_bytes(mem.available)}", style=palette.dim)
         mem_stats.append(f"  cached {human_bytes(mem.cached)}", style=palette.blue)
-        if mem.swap_total:
-            mem_stats.append(
-                f"  swap {human_bytes(mem.swap_used)}/{human_bytes(mem.swap_total)}",
-                style=palette.dim,
-            )
         self.query_one("#mem-stats", OneLine).update_text(mem_stats)
         self.query_one("#mem-graph", HistoryGraph).update_data(
             mem.history, maximum=100, secondary=mem.swap_history
@@ -692,10 +721,10 @@ class OmniTop(App):
         max_rx = max(max(recent_rx), 1) * 1.1
         max_tx = max(max(recent_tx), 1) * 1.1
         self.query_one("#net-graph", HistoryGraph).update_data(
-            net.rx_history,
-            maximum=max_rx,
-            secondary=net.tx_history,
-            secondary_maximum=max_tx,
+            net.tx_history,
+            maximum=max_tx,
+            secondary=net.rx_history,
+            secondary_maximum=max_rx,
         )
         self.query_one("#panel-net").border_subtitle = f" ↓{human_bytes(net.rx_rate)}/s "
 
@@ -712,25 +741,65 @@ class OmniTop(App):
         else:
             self.query_one("#panel-gpu").border_subtitle = " n/a "
 
-        # GPU processes.
-        if snap.gpu.processes:
-            self.gpu_proc_index = min(self.gpu_proc_index, len(snap.gpu.processes) - 1)
-        else:
-            self.gpu_proc_index = 0
-        self.query_one("#gpu-procs", GpuProcTable).update_data(
-            snap.gpu.processes, self.gpu_proc_index
-        )
-
-        # Processes.
+        # Keep every GPU process selectable in both tables, even when it falls
+        # outside the regular process collector's top-N display slice.
+        gpu_processes = list(snap.gpu.processes)
         procs = list(snap.procs)
+        proc_pids = {proc.pid for proc in procs}
+        for gpu_proc in gpu_processes:
+            if gpu_proc.pid in proc_pids:
+                continue
+            procs.append(
+                ProcInfo(
+                    pid=gpu_proc.pid,
+                    name=gpu_proc.name,
+                    user=gpu_proc.user,
+                    cpu=gpu_proc.cpu_pct or 0.0,
+                    mem_pct=gpu_proc.host_mem_pct or 0.0,
+                    rss=gpu_proc.rss,
+                    cmd=gpu_proc.cmd or gpu_proc.name,
+                    create_time=(time.time() - gpu_proc.runtime_s)
+                    if gpu_proc.runtime_s is not None
+                    else 0.0,
+                )
+            )
+            proc_pids.add(gpu_proc.pid)
         if self.proc_sort == "mem":
             procs.sort(key=lambda p: (p.mem_pct, p.rss), reverse=True)
         else:
             procs.sort(key=lambda p: (p.cpu, p.rss), reverse=True)
-        if procs:
-            self.proc_index = min(self.proc_index, len(procs) - 1)
+
+        def index_for_pid(items, pid):
+            if pid is None:
+                return -1
+            return next((i for i, item in enumerate(items) if item.pid == pid), -1)
+
+        if self.focus_area == "gpuprocs" and previous_gpu_pid is not None:
+            preferred_pid = previous_gpu_pid
+        elif self.focus_area == "procs" and previous_proc_pid is not None:
+            preferred_pid = previous_proc_pid
         else:
-            self.proc_index = 0
+            preferred_pid = previous_proc_pid or previous_gpu_pid
+        proc_match = index_for_pid(procs, preferred_pid)
+        gpu_match = index_for_pid(gpu_processes, preferred_pid)
+        if preferred_pid is None and procs:
+            proc_match = min(self.proc_index, len(procs) - 1)
+            preferred_pid = procs[proc_match].pid
+            gpu_match = index_for_pid(gpu_processes, preferred_pid)
+        self.proc_index = proc_match if proc_match >= 0 else min(max(self.proc_index, 0), max(0, len(procs) - 1))
+        self.gpu_proc_index = gpu_match
+        self._displayed_gpu_processes = gpu_processes
+        self._displayed_procs = procs
+        self.query_one("#gpu-procs", GpuProcTable).update_data(
+            gpu_processes,
+            self.gpu_proc_index,
+            snap.gpu.gpus,
+            [
+                session.project
+                for session in snap.agents
+                if session.status in ("thinking", "executing", "waiting")
+            ],
+        )
         self.query_one("#procs", ProcTable).update_data(procs, self.proc_index, self.proc_sort)
         self.query_one("#panel-procs").border_subtitle = f" {self.proc_sort.upper()} "
 

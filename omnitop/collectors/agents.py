@@ -169,6 +169,7 @@ class ClaudeState:
     cache_read: int = 0
     cache_write: int = 0
     turn_count: int = 0
+    current_turn_tokens: int = 0
     context_tokens: int = 0
     context_window: int = 200_000
     last_role: str = ""
@@ -238,7 +239,7 @@ class ClaudeState:
                 self.cache_write += cw
                 if inp or out or cr or cw:
                     self.context_tokens = inp + cr + cw
-                    self.token_history.append(inp + out + cw)
+                    self.current_turn_tokens += inp + out + cr + cw
             model = msg.get("model")
             if model and model != "<synthetic>":
                 self.model = str(model)
@@ -271,7 +272,14 @@ class ClaudeState:
             self.pending_tool = has_tool
             self.last_role = "assistant"
             self.last_stop = str(msg.get("stop_reason") or "")
-            self.turn_count += 1
+            completed = self.last_stop in ("end_turn", "stop_sequence", "max_tokens")
+            if not self.last_stop and not has_tool:
+                completed = True
+            if completed:
+                self.turn_count += 1
+                if self.current_turn_tokens:
+                    self.token_history.append(self.current_turn_tokens)
+                self.current_turn_tokens = 0
 
     def status(self, now: float) -> str:
         age = now - self.updated_at if self.updated_at else 1e9
@@ -350,6 +358,7 @@ class CodexState:
     context_tokens: int = 0
     context_window: int = 0
     turn_count: int = 0
+    current_turn_tokens: int = 0
     last_event: str = ""
     pending_tool: bool = False
     last_tool: tuple[str, str] = ("", "")
@@ -422,7 +431,7 @@ class CodexState:
                     out = int(last.get("output_tokens") or 0)
                     self.context_tokens = inp
                     if inp or out:
-                        self.token_history.append(inp + out)
+                        self.current_turn_tokens += inp + out
                 cw = info.get("model_context_window")
                 if cw:
                     self.context_window = int(cw)
@@ -451,6 +460,10 @@ class CodexState:
             elif etype == "task_complete":
                 self.pending_tool = False
                 self.last_event = "task_complete"
+                self.turn_count += 1
+                if self.current_turn_tokens:
+                    self.token_history.append(self.current_turn_tokens)
+                self.current_turn_tokens = 0
             elif etype == "function_call":
                 self.pending_tool = True
         elif typ == "response_item":
@@ -585,7 +598,9 @@ class OpenCodeCollector:
             pass
         self._conn = None
 
-    def sessions(self, cutoff: float, limit: int = 30) -> list[AgentSession]:
+    def sessions(
+        self, cutoff: float, limit: int = 30, selected_id: str = ""
+    ) -> list[AgentSession]:
         conn = self._connect()
         if conn is None:
             return []
@@ -618,7 +633,9 @@ class OpenCodeCollector:
             model = self._model_name(str(row["model"] or ""))
             updated = int(row["time_updated"] or 0) / 1000.0
             created = int(row["time_created"] or 0) / 1000.0
-            _last_tokens, context_tokens, last_text = self._last_assistant(conn, sid)
+            _last_tokens, context_tokens, last_text, turns, turn_history = self._last_assistant(
+                conn, sid, include_turn_history=(sid == selected_id)
+            )
             context_window = self._guess_context_window(model)
             context_pct = None
             if context_window and context_tokens:
@@ -652,44 +669,90 @@ class OpenCodeCollector:
                         + int(row["tokens_cache_read"] or 0)
                         + int(row["tokens_cache_write"] or 0)
                     ),
+                    turn_count=turns,
                     started_at=created,
                     updated_at=updated,
                     version=str(row["version"] or ""),
                     current_task=title,
                     summary=title,
                     chat=[("ai", last_text)] if last_text else [],
+                    token_history=turn_history,
                     source_path=str(self.db_path),
                 )
             )
         return sessions
 
-    def _last_assistant(self, conn: sqlite3.Connection, session_id: str) -> tuple[int, int, str]:
+    def _last_assistant(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        *,
+        include_turn_history: bool = False,
+    ) -> tuple[int, int, str, int, list[int]]:
         # Deliberately avoid a LIKE scan over the (often multi-GB) message
         # table: walk the last few rows through the session/time index instead.
         try:
+            limit = 256 if include_turn_history else 24
             rows = conn.execute(
-                """
-                SELECT data FROM message
-                WHERE session_id = ?
-                ORDER BY time_created DESC LIMIT 24
-                """,
-                (session_id,),
+                "SELECT data FROM message WHERE session_id = ? "
+                "ORDER BY time_created DESC LIMIT ?",
+                (session_id, limit),
             ).fetchall()
         except sqlite3.Error:
-            return 0, 0, ""
-        for row in rows:
+            return 0, 0, "", 0, []
+        parsed: list[dict] = []
+        for row in reversed(rows):
             try:
                 data = json.loads(row["data"])
             except Exception:
                 continue
+            if isinstance(data, dict):
+                parsed.append(data)
+        last_tokens = 0
+        context_tokens = 0
+        for data in reversed(parsed):
             if data.get("role") != "assistant":
                 continue
             tokens = data.get("tokens") or {}
-            total = int(tokens.get("total") or 0)
             cache = tokens.get("cache") or {}
-            context = int(tokens.get("input") or 0) + int(cache.get("read") or 0) + int(cache.get("write") or 0)
-            return total, context, ""
-        return 0, 0, ""
+            last_tokens = _opencode_message_tokens(tokens)
+            context_tokens = (
+                int(tokens.get("input") or 0)
+                + int(cache.get("read") or 0)
+                + int(cache.get("write") or 0)
+            )
+            break
+
+        turn_history: list[int] = []
+        turn_count = 0
+        if include_turn_history:
+            turn_tokens = 0
+            in_turn = False
+            has_assistant = False
+            for data in parsed:
+                role = data.get("role")
+                if role == "user":
+                    if in_turn and has_assistant:
+                        turn_history.append(turn_tokens)
+                    in_turn = True
+                    has_assistant = False
+                    turn_tokens = 0
+                elif role == "assistant" and in_turn:
+                    has_assistant = True
+                    turn_tokens += _opencode_message_tokens(data.get("tokens") or {})
+            if in_turn and has_assistant:
+                turn_history.append(turn_tokens)
+            try:
+                turn_count = int(conn.execute(
+                    "SELECT COUNT(*) FROM message "
+                    "WHERE session_id = ? AND json_extract(data, '$.role') = 'user'",
+                    (session_id,),
+                ).fetchone()[0])
+            except sqlite3.Error:
+                turn_count = sum(1 for data in parsed if data.get("role") == "user")
+            turn_history = turn_history[-32:]
+        return last_tokens, context_tokens, "", turn_count, turn_history
+
 
     def details(self, session_id: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]], str]:
         """Return (chat, tools, current task) for one session."""
@@ -766,6 +829,20 @@ class OpenCodeCollector:
             if marker in low:
                 return size
         return 0
+
+
+def _opencode_message_tokens(tokens: dict) -> int:
+    cache = tokens.get("cache") or {}
+    return sum(
+        int(value or 0)
+        for value in (
+            tokens.get("input"),
+            tokens.get("output"),
+            tokens.get("reasoning"),
+            cache.get("read"),
+            cache.get("write"),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -958,7 +1035,13 @@ class AgentCollector:
 
         # OpenCode.
         if self._opencode.db_path:
-            sessions.extend(self._opencode.sessions(cutoff, 30 if scope == "all" else 18))
+            sessions.extend(
+                self._opencode.sessions(
+                    cutoff,
+                    30 if scope == "all" else 18,
+                    selected_id=selected_id,
+                )
+            )
 
         # Drop duplicates (same agent + session id), keeping the newest.
         dedup: dict[tuple[str, str], AgentSession] = {}
