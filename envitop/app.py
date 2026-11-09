@@ -41,7 +41,7 @@ from .widgets import (
 )
 
 HELP_TEXT = """\
-[b]omnitop[/b] — btop + nvitop + abtop in one view
+[b]envitop[/b] — btop + nvitop + abtop in one view
 
 [b]Navigation[/b]
   [cyan]j[/cyan] / [cyan]k[/cyan], arrows      move selection
@@ -58,7 +58,7 @@ HELP_TEXT = """\
 [b]Kill[/b]
   [cyan]x[/cyan]                  kill selected process or agent
   [cyan]y[/cyan] / [cyan]n[/cyan]              confirm / cancel
-  OpenCode's shared server and omnitop itself are protected.
+  OpenCode's shared server and envitop itself are protected.
 
 [b]Data sources[/b]
   CPU / memory / network / disk / processes ... psutil
@@ -115,7 +115,7 @@ class HelpScreen(ModalScreen):
         self.dismiss()
 
 
-class OmniTop(App):
+class EnviTop(App):
     CSS = """
     Screen {
         background: #070b10;

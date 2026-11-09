@@ -1,4 +1,4 @@
-"""Synthetic data source used by `omnitop --demo` and screenshots/tests."""
+"""Synthetic data source used by `envitop --demo` and screenshots/tests."""
 
 from __future__ import annotations
 
@@ -247,8 +247,8 @@ class DemoSource:
             AgentSession(
                 agent="opencode",
                 session_id="demo-opencode-1",
-                project="omnitop",
-                cwd="/home/nils/omnitop",
+                project="envitop",
+                cwd="/home/nils/envitop",
                 pid=81900,
                 status="waiting",
                 model="big-pickle",
@@ -267,7 +267,7 @@ class DemoSource:
                 git_modified=5,
                 current_task="Build unified btop + nvitop TUI",
                 summary="Build unified btop + nvitop TUI",
-                tools=[("edit", "omnitop/widgets.py"), ("bash", "pytest -q")],
+                tools=[("edit", "envitop/widgets.py"), ("bash", "pytest -q")],
                 chat=[("you", "Make the GPU panel look like nvitop.")],
                 token_history=[1400, 2200, 3100, 2600, 3400],
             ),
@@ -336,7 +336,7 @@ class DemoSource:
             hostname="workstation",
             username="nils",
             uptime=2 * 86400 + 4 * 3600 + 37 * 60,
-            os_name="Linux 6.8.0-omnitop",
+            os_name="Linux 6.8.0-envitop",
             kernel="#1 SMP",
             cpu=cpu,
             mem=mem,

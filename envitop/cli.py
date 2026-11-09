@@ -57,7 +57,7 @@ def _print_snapshot(snapshot) -> None:
     from .draw import human_ago, human_bytes, human_rate, human_tokens
 
     print(
-        f"omnitop {__version__} — {snapshot.hostname} · {snapshot.username} · "
+        f"envitop {__version__} — {snapshot.hostname} · {snapshot.username} · "
         f"up {snapshot.uptime / 3600:.1f}h · {snapshot.os_name}"
     )
     cpu = snapshot.cpu
@@ -122,7 +122,7 @@ def _print_snapshot(snapshot) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="omnitop",
+        prog="envitop",
         description="btop-style TUI unifying system, NVIDIA GPU and AI-agent monitoring.",
     )
     parser.add_argument("--once", action="store_true", help="print one snapshot and exit")
@@ -140,7 +140,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         default="btop",
         help="colour theme",
     )
-    parser.add_argument("--version", action="version", version=f"omnitop {__version__}")
+    parser.add_argument("--version", action="version", version=f"envitop {__version__}")
     args = parser.parse_args(argv)
 
     if args.once or args.json:
@@ -158,9 +158,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             _print_snapshot(snapshot)
         return 0
 
-    from .app import OmniTop
+    from .app import EnviTop
 
-    app = OmniTop(scope=args.scope, theme=args.theme, demo=args.demo)
+    app = EnviTop(scope=args.scope, theme=args.theme, demo=args.demo)
     try:
         app.run()
     except KeyboardInterrupt:

@@ -1,10 +1,10 @@
-# omnitop
+# envitop
 
 A single terminal dashboard that looks like [btop](https://github.com/aristocratos/btop),
 shows NVIDIA GPUs like [nvitop](https://github.com/XuehaiPan/nvitop), and tracks local AI
 coding agents like [abtop](https://github.com/abtop-dev/abtop).
 
-![omnitop dashboard showing CPU, memory, network, disk, GPU processes, tokens and active agents](docs/omnitop-screenshot.png)
+![envitop dashboard showing CPU, memory, network, disk, GPU processes, tokens and active agents](docs/envitop-screenshot.png)
 
 ```
 ┌ CPU ───────────────────────────┐┌ GPU ───────────────────────────┐┌ AI AGENTS ─────────────────────┐
@@ -28,7 +28,7 @@ coding agents like [abtop](https://github.com/abtop-dev/abtop).
 - **Rate limits** — reads the same local statusline caches abtop uses for
   Claude/Codex 5-hour and 7-day quota windows.
 - **Kill flow** — `x` asks for confirmation before sending `SIGTERM`; the
-  OpenCode shared server and omnitop itself are protected.
+  OpenCode shared server and envitop itself are protected.
 - **Responsive layout** — three columns on wide terminals; `1`/`2`/`3` switch
   between system, GPU and agent views on narrow terminals.
 - **Themes** — btop, Adapta, Dracula, Gruvbox and Nord, cycled with `t`.
@@ -48,36 +48,36 @@ coding agents like [abtop](https://github.com/abtop-dev/abtop).
 From a checkout, without installing:
 
 ```bash
-./omnitop.sh
+./envitop.sh
 ```
 
 Build and run the initial native Rust monitor with its low-overhead `/proc` and `/sys` sampler:
 
 ```bash
 ./native/build.sh
-OMNITOP_NATIVE=1 ./omnitop.sh
+ENVITOP_NATIVE=1 ./envitop.sh
 ```
 
 The regular launcher continues to use the full Textual interface. Set
-`OMNITOP_PYTHON=1` to force it when `OMNITOP_NATIVE=1` is also set. The native
+`ENVITOP_PYTHON=1` to force it when `ENVITOP_NATIVE=1` is also set. The native
 monitor reuses the Python agent collector as a background sidecar. Session
 navigation and the remaining interactive controls are still being ported.
 
-Or install the `omnitop` command:
+Or install the `envitop` command:
 
 ```bash
 python3 -m pip install -e .
-omnitop
+envitop
 ```
 
 Useful flags:
 
 ```bash
-omnitop --demo                 # synthetic data, no GPU/agents required
-omnitop --theme adapta         # btop (default), dracula, gruvbox, nord, adapta
-omnitop --scope all            # include agent sessions from the last 24 h
-omnitop --once                 # print one text snapshot and exit
-omnitop --json                 # print one JSON snapshot and exit
+envitop --demo                 # synthetic data, no GPU/agents required
+envitop --theme adapta         # btop (default), dracula, gruvbox, nord, adapta
+envitop --scope all            # include agent sessions from the last 24 h
+envitop --once                 # print one text snapshot and exit
+envitop --json                 # print one JSON snapshot and exit
 ```
 
 ## Keys
@@ -143,14 +143,14 @@ combinations; those values display as `—` instead of being estimated.
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q omnitop
-ruff check omnitop tests
+python3 -m compileall -q envitop
+ruff check envitop tests
 ```
 
 Project layout:
 
 ```
-omnitop/
+envitop/
   app.py                 Textual app, layout, keys, kill flow
   widgets.py             panels, graphs, tables, header/footer
   draw.py                palettes, formatting, bars, braille graphs
@@ -169,7 +169,7 @@ omnitop/
   Demo mode disables killing, because its PIDs are synthetic.
 - AI-agent records are parsed from local files written by each tool; their
   schemas can change between releases.
-- The OpenCode entry point is a shared server process, so omnitop refuses to kill
+- The OpenCode entry point is a shared server process, so envitop refuses to kill
   it. Kill a child session/port instead.
 - `nvidia-smi` is invoked at the sampling interval; on systems where it is slow
   or unsupported the GPU panel degrades to an explanatory message. NVIDIA may

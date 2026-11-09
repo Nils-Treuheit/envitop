@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import unittest
 
-from omnitop.app import OmniTop
-from omnitop.draw import human_bytes, human_rate, human_tokens
-from omnitop.widgets import AgentTable, GpuPanel
+from envitop.app import EnviTop
+from envitop.draw import human_bytes, human_rate, human_tokens
+from envitop.widgets import AgentTable, GpuPanel
 
 
 class DemoAppTest(unittest.IsolatedAsyncioTestCase):
     async def test_wide_layout_and_modal_keys(self) -> None:
-        app = OmniTop(scope="all", theme="nord", demo=True)
+        app = EnviTop(scope="all", theme="nord", demo=True)
         async with app.run_test(size=(160, 48)) as pilot:
             await pilot.pause()
             self.assertFalse(app.narrow)
@@ -46,7 +46,7 @@ class DemoAppTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(app.confirm_kill)
 
     async def test_narrow_view_switching(self) -> None:
-        app = OmniTop(scope="all", demo=True)
+        app = EnviTop(scope="all", demo=True)
         async with app.run_test(size=(160, 48)) as pilot:
             await pilot.pause()
             await pilot.resize_terminal(100, 40)

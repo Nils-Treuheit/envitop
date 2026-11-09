@@ -1226,8 +1226,8 @@ class Header(Widget):
     """
 
     LOGO = (
-        " █▀█ █▀▄▀█ █▄ █ █ ▀█▀ █▀█ █▀█",
-        " █▄█ █░▀░█ █░▀█ █ ░█░ █▄█ █▀▀",
+        " ⣏⡉ ⡷⣸ ⡇⢸ ⡇ ⢹⠁ ⡎⢱ ⣏⡱",
+        " ⠧⠤ ⠇⠹ ⠸⠃ ⠇ ⠸  ⠣⠜ ⠇",
     )
 
     def __init__(self, **kwargs) -> None:
@@ -1261,7 +1261,7 @@ class Header(Widget):
         w = max(1, self.size.width)
         s = self.snapshot
         if s is None:
-            return Text("omnitop", style=f"bold {palette.accent}")
+            return Text("envitop", style=f"bold {palette.accent}")
         if w < 88:
             if s.gpu.gpus:
                 gpu = s.gpu.gpus[0]
@@ -1269,7 +1269,7 @@ class Header(Widget):
             else:
                 gpu_fields = "GPU n/a · VRAM n/a"
             line = (
-                f"◆ omnitop  {s.hostname} · up {human_duration(s.uptime, short=True)} · "
+                f"◆ envitop  {s.hostname} · up {human_duration(s.uptime, short=True)} · "
                 f"CPU {s.cpu.percent:3.1f}% · RAM {s.mem.percent:3.1f}% · "
                 f"{s.task_count} Tasks · {s.thread_count} Threads · {gpu_fields}"
             )
@@ -1294,12 +1294,15 @@ class Header(Widget):
         lines = logo.plain.split("\n")
         out = Text()
         logow = max(cell_len(x) for x in lines) + 2
+        info_start = max(0, (len(lines) - 2) // 2)
         for i, line in enumerate(lines):
             out.append_text(self._logo_line(i, lines))
             out.append(" " * max(0, logow - cell_len(line)))
-            info = info1 if i == 0 else info2
-            out.append(clip(info, max(0, w - logow)), style=palette.dim if i == 0 else palette.text)
-            if i == 0:
+            if i == info_start:
+                out.append(clip(info1, max(0, w - logow)), style=palette.dim)
+            elif i == info_start + 1:
+                out.append(clip(info2, max(0, w - logow)), style=palette.text)
+            if i < len(lines) - 1:
                 out.append("\n")
         return out
 

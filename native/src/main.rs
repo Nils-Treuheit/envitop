@@ -394,7 +394,7 @@ fn render(d: &Data, agents: Option<&Value>, paused: bool) {
     let mut b=String::from("\x1b[?25l\x1b[38;5;45m");
     let host=d.host.as_str();
     let temp=if d.temp>0.0 {format!("{:.0}°C",d.temp)} else {"—".to_owned()};
-    put(&mut b,0,0,&format!("\x1b[1;36mOMNITOP-RS\x1b[0m  {host}  up {}h   {}  CPU {:.1}% {temp}  MEM {:.1}%  {}",d.uptime/3600,d.model,d.cpu,100.0*d.mem_used as f64/d.mem_total.max(1) as f64,if paused{"PAUSED"}else{"q quit · p pause"}));
+    put(&mut b,0,0,&format!("\x1b[1;36mENVITOP-RS\x1b[0m  {host}  up {}h   {}  CPU {:.1}% {temp}  MEM {:.1}%  {}",d.uptime/3600,d.model,d.cpu,100.0*d.mem_used as f64/d.mem_total.max(1) as f64,if paused{"PAUSED"}else{"q quit · p pause"}));
     let cx=0; let cy=1; border(&mut b,cx,cy,left,cpu_h,"CPU"); clear_panel(&mut b,cx,cy,left,cpu_h);
     let label=fit(&format!("{}  {:.1}%  total {:.1}%  user {:.1}%  load {}",d.model,d.cpu,d.cpu,d.user_cpu,d.load),left.saturating_sub(4)); put(&mut b,cx+2,cy+1,&label);
     let core_cols=((left.saturating_sub(4))/13).max(1); let core_rows=(d.cores.len()+core_cols-1)/core_cols;
@@ -488,8 +488,8 @@ fn agent_sidecar() -> Receiver<Option<Value>> {
     thread::spawn(move || loop {
         let script = r#"
 import dataclasses, json, time, psutil
-from omnitop.collectors.agents import AgentCollector
-from omnitop.model import ProcInfo
+from envitop.collectors.agents import AgentCollector
+from envitop.model import ProcInfo
 c=AgentCollector(); p={}; prev=None; prev_at=time.monotonic()
 while True:
   p={}
@@ -516,22 +516,22 @@ while True:
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--version") {
-        println!("omnitop-native 0.1.0 (Rust)");
+        println!("envitop-native 0.1.0 (Rust)");
         return;
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("omnitop-native 0.1.0\nNative Linux resource monitor\n\nUsage: omnitop-native [--help] [--version]\n\nKeys: q quit, p pause");
+        println!("envitop-native 0.1.0\nNative Linux resource monitor\n\nUsage: envitop-native [--help] [--version]\n\nKeys: q quit, p pause");
         return;
     }
     if !args.is_empty() {
-        eprintln!("unsupported native options: {}. Use OMNITOP_PYTHON=1 for Python CLI options.", args.join(" "));
+        eprintln!("unsupported native options: {}. Use ENVITOP_PYTHON=1 for Python CLI options.", args.join(" "));
         std::process::exit(2);
     }
     let (mut old_cpu,mut old_cores)=read_cpu();
     let (mut old_rx,mut old_tx)=read_network(); let (mut old_read,mut old_write)=read_disks();
     let mut old_procs=HashMap::new(); let mut old_devices=read_disk_devices(); let mut data=Data::default(); data.model=cpu_model(); data.host=fs::read_to_string("/etc/hostname").unwrap_or_default().trim().to_owned();
     let mut raw:termios=unsafe{std::mem::zeroed()};
-    if unsafe {tcgetattr(0,&mut raw)} != 0 { eprintln!("omnitop-native requires an interactive terminal"); return; }
+    if unsafe {tcgetattr(0,&mut raw)} != 0 { eprintln!("envitop-native requires an interactive terminal"); return; }
     let gpu_rx=gpu_thread(); let agent_rx=agent_sidecar(); let mut agent:Option<Value>=None; let mut paused=false;
     let mut cooked=raw; cooked.c_lflag &= !(ECHO|ICANON|ISIG); cooked.c_cc[VMIN]=0; cooked.c_cc[VTIME]=0; unsafe{tcsetattr(0,TCSANOW,&cooked);}
     print!("\x1b[?1049h\x1b[2J\x1b[?25l"); let _=io::stdout().flush(); let mut last=Instant::now();

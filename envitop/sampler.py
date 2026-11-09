@@ -14,7 +14,7 @@ from .model import AgentSession, GpuState, ProcInfo, RateLimit, Snapshot
 
 class Sampler(threading.Thread):
     def __init__(self, scope: str = "recent") -> None:
-        super().__init__(name="omnitop-sampler", daemon=True)
+        super().__init__(name="envitop-sampler", daemon=True)
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._force = threading.Event()
@@ -74,7 +74,7 @@ class Sampler(threading.Thread):
     # -- thread ----------------------------------------------------------
 
     def run(self) -> None:
-        gpu_thread = threading.Thread(target=self._gpu_loop, name="omnitop-gpu-sampler", daemon=True)
+        gpu_thread = threading.Thread(target=self._gpu_loop, name="envitop-gpu-sampler", daemon=True)
         gpu_thread.start()
         while not self._stop.is_set():
             if self.paused:

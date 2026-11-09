@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "omnitop"
+name = "envitop"
 version = "0.1.0"
 description = "A btop-style TUI that unifies system, NVIDIA GPU and AI-agent monitoring"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "omnitop contributors" }]
+authors = [{ name = "envitop contributors" }]
 keywords = ["tui", "monitor", "gpu", "nvidia", "btop", "nvitop", "abtop", "ai-agents"]
 dependencies = [
   "textual>=0.80",
@@ -21,10 +21,10 @@ dependencies = [
 dev = ["pytest>=7", "ruff>=0.5"]
 
 [project.scripts]
-omnitop = "omnitop.cli:main"
+envitop = "envitop.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["omnitop*"]
+include = ["envitop*"]
 
 [tool.ruff]
 target-version = "py39"
