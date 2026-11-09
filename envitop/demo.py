@@ -155,8 +155,22 @@ class DemoSource:
             read_history=list(self._read_hist),
             write_history=list(self._write_hist),
             mounts=[
-                MountInfo("/", int(412 * GB), 931 * GB, 44),
-                MountInfo("/mnt/data", int(3.2e12), int(4.0e12), 80),
+                MountInfo(
+                    "/", int(412 * GB), 931 * GB, 44,
+                    free=519 * GB,
+                    read_rate=self._read_hist[-1] * 0.28,
+                    write_rate=self._write_hist[-1] * 0.16,
+                    read_history=[value * 0.28 for value in self._read_hist],
+                    write_history=[value * 0.16 for value in self._write_hist],
+                ),
+                MountInfo(
+                    "/mnt/data", int(3.2e12), int(4.0e12), 80,
+                    free=int(0.8e12),
+                    read_rate=self._read_hist[-1] * 0.72,
+                    write_rate=self._write_hist[-1] * 0.84,
+                    read_history=[value * 0.72 for value in self._read_hist],
+                    write_history=[value * 0.84 for value in self._write_hist],
+                ),
             ],
             temp_c=47,
         )
@@ -189,6 +203,19 @@ class DemoSource:
                 GpuProcess(0, 6668, "gnome-shell", "G", 2, 1, int(0.4 * GB), "nils"),
             ],
         )
+        def turn_samples(seed: float, mean: float, amplitude: float) -> list[int]:
+            return [
+                max(
+                    100,
+                    int(
+                        mean
+                        + amplitude * math.sin(i * 0.72 + seed)
+                        + amplitude * 0.28 * math.sin(i * 1.91 + seed * 0.5)
+                    ),
+                )
+                for i in range(36)
+            ]
+
         agents = [
             AgentSession(
                 agent="claude",
@@ -228,7 +255,7 @@ class DemoSource:
                     ("ai", "The recall@10 drop comes from the new ef_search default."),
                     ("you", "Patch it and rerun the regression test."),
                 ],
-                token_history=[2100, 3300, 1800, 4200, 2700, 5100, 3900],
+                token_history=turn_samples(0.2, 3_400, 1_700),
             ),
             AgentSession(
                 agent="codex",
@@ -261,7 +288,7 @@ class DemoSource:
                 ],
                 tools=[("exec", "python tools/eval_sgg.py --split val")],
                 chat=[("you", "Run the VG-150 evaluation and compare with the baseline.")],
-                token_history=[8200, 6100, 9400, 7800, 10200, 5700],
+                token_history=turn_samples(1.3, 7_800, 2_600),
             ),
             AgentSession(
                 agent="opencode",
@@ -292,7 +319,7 @@ class DemoSource:
                 ],
                 tools=[("edit", "envitop/widgets.py"), ("bash", "pytest -q")],
                 chat=[("you", "Make the GPU panel look like nvitop.")],
-                token_history=[1400, 2200, 3100, 2600, 3400],
+                token_history=turn_samples(2.1, 2_500, 1_400),
             ),
             AgentSession(
                 agent="codex",
@@ -326,7 +353,7 @@ class DemoSource:
                 ],
                 tools=[("Read", "envitop/demo.py"), ("Edit", "docs/envitop-demo.svg"), ("Bash", "cargo check --release")],
                 chat=[("ai", "The demo now includes bursty IO, CPU and GPU histories.")],
-                token_history=[2600, 1900, 4200, 3100, 5100, 2800],
+                token_history=turn_samples(2.8, 4_600, 2_100),
             ),
             AgentSession(
                 agent="claude",
@@ -359,7 +386,7 @@ class DemoSource:
                 ],
                 tools=[("Read", "README.md"), ("Edit", "docs/quickstart.md"), ("Bash", "npm run build")],
                 chat=[("you", "Make the setup steps match the current launcher.")],
-                token_history=[1700, 2400, 1200, 3100, 2800],
+                token_history=turn_samples(3.4, 3_200, 1_300),
             ),
             AgentSession(
                 agent="claude",
