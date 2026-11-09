@@ -47,14 +47,24 @@ class DemoSource:
         """Pre-fill graphs so the first frame already looks like btop."""
         for i in range(120):
             t = -0.5 * (120 - i)
-            self._cpu_hist.append(34 + 20 * math.sin(t / 9) + 6 * math.sin(t / 2.3))
-            self._mem_hist.append(42 + 5 * math.sin(t / 17))
-            self._gpu_hist.append(max(0, min(100, 78 + 18 * math.sin(t / 7))))
-            self._vram_hist.append(58 + 6 * math.sin(t / 13))
-            self._rx_hist.append(max(0, 5.4 * MB + 3.5 * MB * math.sin(t / 5)))
-            self._tx_hist.append(max(0, 900_000 + 450_000 * math.sin(t / 4 + 1)))
-            self._read_hist.append(max(0, 41 * MB + 32 * MB * math.sin(t / 6)))
-            self._write_hist.append(max(0, 12 * MB + 9 * MB * math.sin(t / 4 + 1)))
+            self._cpu_hist.append(42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95))
+            self._mem_hist.append(46 + 8 * math.sin(t / 18) + 3 * math.sin(t / 4.2))
+            gpu = 54 + 27 * math.sin(t / 8) + 17 * math.sin(t / 2.3)
+            gpu += 16 * max(0.0, math.sin(t / 11)) ** 10
+            self._gpu_hist.append(max(0, min(100, gpu)))
+            self._vram_hist.append(66 + 5 * math.sin(t / 14) + 3 * math.sin(t / 3.1))
+            rx = 0.6 + 6.0 * max(0.0, math.sin(t / 4.1)) ** 1.6
+            rx += 3.0 * max(0.0, math.sin(t / 1.5 + 0.8)) ** 4
+            tx = 0.2 + 2.2 * max(0.0, math.sin(t / 3.3 + 1.1)) ** 2.4
+            tx += 1.6 * max(0.0, math.sin(t / 1.25)) ** 5
+            self._rx_hist.append(rx * MB)
+            self._tx_hist.append(tx * MB)
+            read = 4 + 34 * max(0.0, math.sin(t / 5.1)) ** 6
+            read += 16 * max(0.0, math.sin(t / 1.7 + 1)) ** 8
+            write = 2 + 21 * max(0.0, math.sin(t / 4.2 + 1.4)) ** 7
+            write += 12 * max(0.0, math.sin(t / 1.35 + 0.5)) ** 8
+            self._read_hist.append(read * MB)
+            self._write_hist.append(write * MB)
 
     # API used by the app -------------------------------------------------
     def start(self) -> None:
@@ -77,28 +87,37 @@ class DemoSource:
             self.t += 0.5
         t = self.t
         now = time.time()
-        cpu_total = 34 + 20 * math.sin(t / 9) + 6 * math.sin(t / 2.3)
+        cpu_total = 42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95)
         cores = []
         for i in range(24):
             cores.append(max(1, min(100, cpu_total + 24 * math.sin(t / 5 + i * 0.7) + random.uniform(-6, 6))))
         if not self.paused:
             self._cpu_hist.append(cpu_total)
-        mem_pct = 42 + 5 * math.sin(t / 17)
+        mem_pct = 46 + 8 * math.sin(t / 18) + 3 * math.sin(t / 4.2)
         if not self.paused:
             self._mem_hist.append(mem_pct)
-        gpu_util = 78 + 18 * math.sin(t / 7) + random.uniform(-4, 4)
+        gpu_util = 54 + 27 * math.sin(t / 8) + 17 * math.sin(t / 2.3)
+        gpu_util += 16 * max(0.0, math.sin(t / 11)) ** 10 + random.uniform(-3, 3)
         gpu_util = max(0, min(100, gpu_util))
-        vram_pct = 58 + 6 * math.sin(t / 13)
+        vram_pct = 66 + 5 * math.sin(t / 14) + 3 * math.sin(t / 3.1)
         if not self.paused:
             self._gpu_hist.append(gpu_util)
             self._vram_hist.append(vram_pct)
-        rx = max(0, 5.4 * MB + 3.5 * MB * math.sin(t / 5) + random.uniform(0, 1.5 * MB))
-        tx = max(0, 900_000 + 450_000 * math.sin(t / 4 + 1) + random.uniform(0, 200_000))
+        rx = 0.6 + 6.0 * max(0.0, math.sin(t / 4.1)) ** 1.6
+        rx += 3.0 * max(0.0, math.sin(t / 1.5 + 0.8)) ** 4
+        tx = 0.2 + 2.2 * max(0.0, math.sin(t / 3.3 + 1.1)) ** 2.4
+        tx += 1.6 * max(0.0, math.sin(t / 1.25)) ** 5
+        rx = max(0, rx * MB + random.uniform(0, 0.8 * MB))
+        tx = max(0, tx * MB + random.uniform(0, 0.3 * MB))
         if not self.paused:
             self._rx_hist.append(rx)
             self._tx_hist.append(tx)
-            self._read_hist.append(max(0, 41 * MB + 32 * MB * math.sin(t / 6)))
-            self._write_hist.append(max(0, 12 * MB + 9 * MB * math.sin(t / 4 + 1)))
+            read = 4 + 34 * max(0.0, math.sin(t / 5.1)) ** 6
+            read += 16 * max(0.0, math.sin(t / 1.7 + 1)) ** 8
+            write = 2 + 21 * max(0.0, math.sin(t / 4.2 + 1.4)) ** 7
+            write += 12 * max(0.0, math.sin(t / 1.35 + 0.5)) ** 8
+            self._read_hist.append(max(0, read * MB + random.uniform(0, 1.2 * MB)))
+            self._write_hist.append(max(0, write * MB + random.uniform(0, 0.8 * MB)))
 
         cpu = CpuInfo(
             percent=cpu_total,
@@ -267,9 +286,80 @@ class DemoSource:
                 git_modified=5,
                 current_task="Build unified btop + nvitop TUI",
                 summary="Build unified btop + nvitop TUI",
+                children=[
+                    ChildProc(81914, "cargo build --release", 482_000, None),
+                    ChildProc(81928, "python -m ruff check envitop", 96_000, None),
+                ],
                 tools=[("edit", "envitop/widgets.py"), ("bash", "pytest -q")],
                 chat=[("you", "Make the GPU panel look like nvitop.")],
                 token_history=[1400, 2200, 3100, 2600, 3400],
+            ),
+            AgentSession(
+                agent="codex",
+                session_id="demo-codex-2",
+                project="envitop",
+                cwd="/home/nils/envitop",
+                pid=82416,
+                status="executing",
+                model="gpt-6.1-terra",
+                effort="high",
+                context_pct=57.0,
+                context_tokens=147_700,
+                context_window=258_400,
+                input_tokens=42_800,
+                output_tokens=8_600,
+                cache_read=214_000,
+                cache_write=1_200,
+                total_tokens=266_600,
+                turn_count=11,
+                started_at=now - 1_780,
+                updated_at=now - 5,
+                mem_mb=334,
+                git_branch="feat/demo-dashboard",
+                git_added=5,
+                git_modified=3,
+                current_task="Increase graph variation and polish the demo export",
+                summary="Refresh demo graphs and agent process examples",
+                children=[
+                    ChildProc(82431, "python -m compileall -q envitop", 124_000, None),
+                    ChildProc(82457, "cargo check --release", 662_000, None),
+                ],
+                tools=[("Read", "envitop/demo.py"), ("Edit", "docs/envitop-demo.svg"), ("Bash", "cargo check --release")],
+                chat=[("ai", "The demo now includes bursty IO, CPU and GPU histories.")],
+                token_history=[2600, 1900, 4200, 3100, 5100, 2800],
+            ),
+            AgentSession(
+                agent="claude",
+                session_id="demo-claude-3",
+                project="docs-site",
+                cwd="/home/nils/code/docs-site",
+                pid=82642,
+                status="executing",
+                model="claude-sonnet-4-5",
+                context_pct=34.0,
+                context_tokens=68_000,
+                context_window=200_000,
+                input_tokens=24_600,
+                output_tokens=7_800,
+                cache_read=88_200,
+                cache_write=3_400,
+                total_tokens=124_000,
+                turn_count=8,
+                started_at=now - 1_120,
+                updated_at=now - 11,
+                mem_mb=258,
+                git_branch="docs/quickstart",
+                git_added=4,
+                git_modified=6,
+                current_task="Check install steps and validate the SVG overview",
+                summary="Update quickstart and check command examples",
+                children=[
+                    ChildProc(82655, "npm run build", 326_000, None),
+                    ChildProc(82682, "node scripts/check_links.js", 112_000, None),
+                ],
+                tools=[("Read", "README.md"), ("Edit", "docs/quickstart.md"), ("Bash", "npm run build")],
+                chat=[("you", "Make the setup steps match the current launcher.")],
+                token_history=[1700, 2400, 1200, 3100, 2800],
             ),
             AgentSession(
                 agent="claude",
@@ -323,9 +413,15 @@ class DemoSource:
             ProcInfo(61204, "python3", "nils", 17.2, 14.2, int(4.1 * GB), "python -m train.ddp --config configs/large.toml", ppid=1, gpu_index=0, gpu_sm=82, gpu_mem_pct=54),
             ProcInfo(73912, "codex", "nils", 3.7, 3.1, int(1.2 * GB), "codex exec --full-auto", ppid=4211, gpu_index=0, gpu_sm=47, gpu_mem_pct=32),
             ProcInfo(81900, "opencode", "nils", 31.2, 2.0, int(0.9 * GB), "opencode", ppid=1),
+            ProcInfo(82416, "codex", "nils", 24.6, 2.8, int(1.1 * GB), "codex exec --full-auto --title envitop-demo", ppid=1),
+            ProcInfo(82642, "claude", "nils", 15.2, 1.9, int(0.7 * GB), "claude --project docs-site", ppid=1),
             ProcInfo(4120, "firefox", "nils", 22.8, 6.4, int(2.8 * GB), "firefox --new-window", ppid=1),
             ProcInfo(9412, "gnome-shell", "nils", 18.4, 2.1, int(0.8 * GB), "gnome-shell --mode=user", ppid=1),
             ProcInfo(61344, "uvicorn", "nils", 12.6, 2.6, int(1.0 * GB), "uvicorn api.main:app --port 8080", ppid=61204),
+            ProcInfo(82431, "python", "nils", 7.2, 0.8, int(124 * MB), "python -m compileall -q envitop", ppid=82416),
+            ProcInfo(82457, "rustc", "nils", 43.1, 4.6, int(1.8 * GB), "cargo check --release", ppid=82416),
+            ProcInfo(82655, "node", "nils", 8.6, 0.7, int(326 * MB), "npm run build", ppid=82642),
+            ProcInfo(82682, "node", "nils", 2.4, 0.2, int(112 * MB), "node scripts/check_links.js", ppid=82642),
             ProcInfo(6668, "Xorg", "nils", 9.1, 1.2, int(0.6 * GB), "/usr/lib/Xorg vt2 -displayfd 3", ppid=1),
             ProcInfo(311, "systemd", "root", 0.9, 0.1, int(42 * MB), "/sbin/init splash", ppid=0),
             ProcInfo(2055, "opencode", "nils", 0.4, 0.4, int(180 * MB), "opencode serve --hostname 127.0.0.1", ppid=1),
