@@ -228,6 +228,39 @@ def human_rate(n: float) -> str:
     return human_bytes(n, precise=False) + "/s"
 
 
+def sparkline(values: Sequence[float], width: int = 4) -> str:
+    """Return a compact, connected Unicode trace for a short history."""
+    width = max(1, int(width))
+    vals = [max(0.0, float(v)) for v in values]
+    if not vals:
+        vals = [0.0]
+    if len(vals) < width:
+        vals = [0.0] * (width - len(vals)) + vals
+    elif len(vals) > width:
+        count = len(vals)
+        vals = [
+            max(vals[int(i * count / width): max(int(i * count / width) + 1,
+                                                  int((i + 1) * count / width))])
+            for i in range(width)
+        ]
+    peak = max(vals) or 1.0
+    glyphs = "▁▂▃▄▅▆▇█"
+    return "".join(glyphs[min(7, int(value / peak * 7))] for value in vals)
+
+
+def smooth_series(values: Sequence[float], window: int = 3) -> list[float]:
+    """Average adjacent samples for display so isolated peaks do not float."""
+    vals = [float(value) for value in values]
+    if len(vals) < 3 or window <= 1:
+        return vals
+    radius = max(1, window // 2)
+    return [
+        sum(vals[max(0, i - radius): min(len(vals), i + radius + 1)])
+        / len(vals[max(0, i - radius): min(len(vals), i + radius + 1)])
+        for i in range(len(vals))
+    ]
+
+
 def human_tokens(n: float) -> str:
     n = float(n or 0)
     if n >= 1_000_000:
@@ -367,7 +400,9 @@ def braille_graph(
                 continue
             for d in range(level):
                 cell_row = height - 1 - (d // 4)
-                dot = d % 4
+                # d counts from the graph baseline upward, while Braille
+                # dot numbering counts from the character's top downward.
+                dot = 3 - (d % 4)
                 # Braille ordering: dots 1,2,3,7 on the left and 4,5,6,8
                 # on the right (bits 0x01,0x02,0x04,0x40 / 0x08..0x80).
                 if dot == 3:
@@ -393,6 +428,84 @@ def braille_graph(
             else:
                 colour = palette.accent
             line.append(chr(0x2800 + mask), style=colour)
+        lines.append(line)
+    return lines
+
+
+def braille_line_graph(
+    values: Sequence[float],
+    width: int,
+    height: int,
+    palette: Palette,
+    *,
+    maximum: Optional[float] = None,
+    color_by: str = "value",
+    solid_color: Optional[str] = None,
+) -> list[Text]:
+    """Render a connected Braille trace instead of a filled dot field."""
+    width = max(1, int(width))
+    height = max(1, int(height))
+    point_count = width * 2
+    vals = [float(v) for v in values]
+    if not vals:
+        vals = [0.0]
+    if len(vals) < point_count:
+        vals = [0.0] * (point_count - len(vals)) + vals
+    elif len(vals) > point_count:
+        count = len(vals)
+        vals = [
+            max(vals[int(i * count / point_count): max(int(i * count / point_count) + 1,
+                                                         int((i + 1) * count / point_count))])
+            for i in range(point_count)
+        ]
+    maximum = max(maximum if maximum is not None else max(vals), 1e-9)
+    dot_height = height * 4
+    points = [
+        (x, dot_height - 1 - int(round(max(0.0, min(1.0, value / maximum)) * (dot_height - 1))))
+        for x, value in enumerate(vals)
+    ]
+    cells = [[0] * height for _ in range(width)]
+
+    def plot(x: int, y: int) -> None:
+        col, row = x // 2, y // 4
+        sub_x, sub_y = x % 2, y % 4
+        bit = ((0x01 if sub_x == 0 else 0x08) << sub_y) if sub_y < 3 else (0x40 if sub_x == 0 else 0x80)
+        cells[col][row] |= bit
+
+    for start, end in zip(points, points[1:]):
+        x0, y0 = start
+        x1, y1 = end
+        dx, dy = abs(x1 - x0), abs(y1 - y0)
+        sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+        error = dx - dy
+        while True:
+            plot(x0, y0)
+            if (x0, y0) == (x1, y1):
+                break
+            twice = 2 * error
+            if twice > -dy:
+                error -= dy
+                x0 += sx
+            if twice < dx:
+                error += dx
+                y0 += sy
+
+    lines: list[Text] = []
+    for row in range(height):
+        line = Text()
+        for col in range(width):
+            mask = cells[col][row]
+            if not mask:
+                line.append(" ")
+                continue
+            if solid_color:
+                color = solid_color
+            elif color_by == "value":
+                value = max(vals[col * 2], vals[col * 2 + 1])
+                color = palette.gradient(value / maximum * 100)
+            else:
+                color = palette.accent
+            line.append(chr(0x2800 + mask), style=color)
         lines.append(line)
     return lines
 

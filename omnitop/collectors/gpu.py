@@ -37,10 +37,12 @@ class GpuCollector:
         self._hist: dict[int, list[float]] = {}
         self._mem_hist: dict[int, list[float]] = {}
         self._last_error = ""
+        self._last_command_ok = True
         self._driver = ""
         self._last_header_check = 0.0
 
     def _run(self, args: list[str], timeout: float = 3.0) -> str:
+        self._last_command_ok = False
         try:
             out = subprocess.run(
                 args,
@@ -55,6 +57,7 @@ class GpuCollector:
         if out.returncode != 0:
             self._last_error = f"nvidia-smi exited {out.returncode}"
             return ""
+        self._last_command_ok = True
         return out.stdout
 
     def _read_driver(self) -> str:
@@ -72,7 +75,10 @@ class GpuCollector:
                 break
         return self._driver
 
-    def sample(self, proc_index: dict[int, ProcInfo]) -> GpuState:
+    def refresh_driver(self) -> str:
+        return self._read_driver()
+
+    def sample(self, proc_index: dict[int, ProcInfo], include_processes: bool = True) -> GpuState:
         if not shutil.which("nvidia-smi"):
             return GpuState(available=False, error="nvidia-smi not found")
         out = self._run(
@@ -128,15 +134,22 @@ class GpuCollector:
         if not gpus:
             return GpuState(available=False, error="no NVIDIA GPU detected")
 
-        processes = self._processes(proc_index, gpus)
+        processes = (self._processes(proc_index, gpus) or []) if include_processes else []
         return GpuState(
             available=True,
             gpus=gpus,
             processes=processes,
-            driver=self._read_driver(),
+            driver=self._read_driver() if include_processes else self._driver,
         )
 
-    def _processes(self, proc_index: dict[int, ProcInfo], gpus: list[GpuInfo]) -> list[GpuProcess]:
+    def sample_processes(
+        self, proc_index: dict[int, ProcInfo], gpus: list[GpuInfo]
+    ) -> Optional[list[GpuProcess]]:
+        return self._processes(proc_index, gpus)
+
+    def _processes(
+        self, proc_index: dict[int, ProcInfo], gpus: list[GpuInfo]
+    ) -> Optional[list[GpuProcess]]:
         total_by_index = {g.index: g.mem_total for g in gpus}
         spend: dict[tuple[int, int], int] = {}
         apps: dict[int, int] = {}
@@ -148,12 +161,15 @@ class GpuCollector:
             ],
             timeout=3,
         )
+        apps_ok = self._last_command_ok
         for line in app_out.splitlines():
             parts = [p.strip() for p in line.split(",")]
             if len(parts) >= 2 and parts[0].isdigit():
                 apps[int(parts[0])] = _int(parts[1]) * 1024 * 1024
 
         pmon = self._run(["nvidia-smi", "pmon", "-c", "1"], timeout=4)
+        if not self._last_command_ok:
+            return None
         rows: list[GpuProcess] = []
         seen: set[tuple[int, int]] = set()
         for line in pmon.splitlines():
@@ -196,6 +212,8 @@ class GpuCollector:
             )
 
         # Fallback: compute-apps are visible even when pmon is unsupported.
+        if not rows and not apps_ok:
+            return None
         if not rows and apps:
             for pid, vram in apps.items():
                 proc = proc_index.get(pid)
@@ -212,5 +230,5 @@ class GpuCollector:
                         user=proc.user if proc else "",
                     )
                 )
-        rows.sort(key=lambda p: (p.gpu_index, -(p.sm or 0), -p.vram))
+        rows.sort(key=lambda p: (p.gpu_index, -p.vram, p.pid))
         return rows

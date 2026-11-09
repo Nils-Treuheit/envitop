@@ -16,14 +16,14 @@ coding agents like [abtop](https://github.com/abtop-dev/abtop).
 
 ## Features
 
-- **btop-style system view** — CPU graph and per-core bars, memory/swap, network
-  RX/TX history, disk read/write history and filesystem usage, process table
-  with sorting.
+- **btop-style system view** — split CPU total/user and RAM/swap histories,
+  per-core bars, cached and available memory, network RX/TX, per-partition
+  read/write histories and used/free storage, and a sortable process table.
 - **nvitop-style GPU view** — utilisation and VRAM graphs, temperature, power,
   fan, clocks, p-state, and a per-process table with SM%, memory and VRAM.
 - **abtop-style agent view** — Claude Code, Codex CLI and OpenCode sessions with
-  status, model, project, context usage, token totals, token rate, recent tool
-  calls, child processes/ports and a chat tail.
+  status, model, project, context usage, a token breakdown and rate, recent
+  tool calls, child processes/ports and a chat tail.
 - **Rate limits** — reads the same local statusline caches abtop uses for
   Claude/Codex 5-hour and 7-day quota windows.
 - **Kill flow** — `x` asks for confirmation before sending `SIGTERM`; the
@@ -49,6 +49,18 @@ From a checkout, without installing:
 ```bash
 ./omnitop.sh
 ```
+
+Build and run the initial native Rust monitor with its low-overhead `/proc` and `/sys` sampler:
+
+```bash
+./native/build.sh
+OMNITOP_NATIVE=1 ./omnitop.sh
+```
+
+The regular launcher continues to use the full Textual interface. Set
+`OMNITOP_PYTHON=1` to force it when `OMNITOP_NATIVE=1` is also set. The native
+monitor reuses the Python agent collector as a background sidecar. Session
+navigation and the remaining interactive controls are still being ported.
 
 Or install the `omnitop` command:
 

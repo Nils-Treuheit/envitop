@@ -19,12 +19,15 @@ from .draw import (
     human_bytes,
     human_rate,
     set_palette,
+    smooth_series,
+    truncate_middle,
 )
 from .model import AgentSession, Snapshot
 from .sampler import Sampler
 from .widgets import (
     AgentTable,
     CoreBars,
+    DiskPanel,
     Footer,
     GpuPanel,
     GpuProcTable,
@@ -34,6 +37,7 @@ from .widgets import (
     ProcTable,
     QuotaPanel,
     SessionDetail,
+    TokenOverview,
 )
 
 HELP_TEXT = """\
@@ -142,18 +146,20 @@ class OmniTop(App):
     .stat {
         height: 1;
     }
-    #panel-cpu { height: 2.4fr; }
-    #panel-mem { height: 1.15fr; }
+    #panel-cpu { height: 2.6fr; }
+    #panel-mem { height: 1.4fr; }
     #panel-net { height: 1.15fr; }
-    #panel-disk { height: 1.35fr; }
+    #panel-disk { height: 1.65fr; }
     #panel-gpu { height: 2.5fr; }
     #panel-gpuprocs { height: 1.3fr; }
     #panel-procs { height: 1.45fr; }
-    #panel-agents { height: 2.65fr; }
-    #panel-detail { height: 1.6fr; }
+    #panel-agents { height: 1.85fr; }
+    #panel-tokens { height: 2.0fr; }
+    #panel-detail { height: 1.3fr; }
     #panel-quota { height: 1.0fr; }
-    #cpu-graph { height: 1.1fr; min-height: 1; }
-    #cpu-cores { height: 1fr; min-height: 1; }
+    #cpu-content { height: 1fr; }
+    #cpu-graph { width: 1fr; height: 1.5fr; min-height: 2; }
+    #cpu-cores { width: 1fr; height: 1fr; min-height: 3; }
     #footer {
         height: 1;
         padding: 0 1;
@@ -205,27 +211,40 @@ class OmniTop(App):
             with Vertical(id="col-left", classes="col"):
                 with Vertical(id="panel-cpu", classes="panel"):
                     yield OneLine(id="cpu-stats")
-                    yield HistoryGraph(maximum=100, id="cpu-graph")
-                    yield CoreBars(id="cpu-cores")
+                    with Vertical(id="cpu-content"):
+                        yield CoreBars(id="cpu-cores")
+                        yield HistoryGraph(
+                            maximum=100,
+                            color_mode="value",
+                            primary_role="green",
+                            secondary_role="cyan",
+                            primary_label="USER CPU",
+                            secondary_label="TOTAL CPU",
+                            id="cpu-graph",
+                        )
                 with Vertical(id="panel-mem", classes="panel"):
                     yield OneLine(id="mem-stats")
-                    yield HistoryGraph(maximum=100, id="mem-graph")
+                    yield HistoryGraph(
+                        maximum=100,
+                        color_mode="value",
+                        primary_role="magenta",
+                        secondary_role="cyan",
+                        primary_label="RAM USED",
+                        secondary_label="SWAP USED",
+                        id="mem-graph",
+                    )
                 with Vertical(id="panel-net", classes="panel"):
                     yield OneLine(id="net-stats")
                     yield HistoryGraph(
                         id="net-graph",
-                        color_mode="accent",
+                        color_mode="value",
                         primary_role="green",
                         secondary_role="cyan",
+                        primary_label="RX ↓",
+                        secondary_label="TX ↑",
                     )
                 with Vertical(id="panel-disk", classes="panel"):
-                    yield OneLine(id="disk-stats")
-                    yield HistoryGraph(
-                        id="disk-graph",
-                        color_mode="accent",
-                        primary_role="yellow",
-                        secondary_role="magenta",
-                    )
+                    yield DiskPanel(id="disk-panel")
             with Vertical(id="col-mid", classes="col"):
                 with Vertical(id="panel-gpu", classes="panel"):
                     yield GpuPanel(id="gpu-panel")
@@ -236,6 +255,8 @@ class OmniTop(App):
             with Vertical(id="col-right", classes="col"):
                 with Vertical(id="panel-agents", classes="panel"):
                     yield AgentTable(id="agents")
+                with Vertical(id="panel-tokens", classes="panel"):
+                    yield TokenOverview(id="tokens")
                 with Vertical(id="panel-detail", classes="panel"):
                     yield SessionDetail(id="detail")
                 with Vertical(id="panel-quota", classes="panel"):
@@ -253,6 +274,7 @@ class OmniTop(App):
             "panel-procs": " PROCESSES ",
             "panel-agents": " AI AGENTS ",
             "panel-detail": " SESSION ",
+            "panel-tokens": " TOKENS ",
             "panel-quota": " RATE LIMITS ",
         }
         for panel_id, title in titles.items():
@@ -316,7 +338,7 @@ class OmniTop(App):
             ids = {
                 "system": ["panel-cpu", "panel-mem", "panel-net", "panel-disk"],
                 "gpu": ["panel-gpu", "panel-gpuprocs", "panel-procs"],
-                "agents": ["panel-agents", "panel-detail", "panel-quota"],
+                "agents": ["panel-agents", "panel-tokens", "panel-detail", "panel-quota"],
             }.get(self.view, [])
         else:
             ids = {
@@ -621,7 +643,8 @@ class OmniTop(App):
         temp = f"  {cpu.temp_c:.0f}°C" if cpu.temp_c is not None else ""
         freq = f"{cpu.freq_mhz / 1000:.2f} GHz" if cpu.freq_mhz else "—"
         cpu_stats = Text()
-        cpu_stats.append(f"{cpu.percent:5.1f}%", style=f"bold {palette.gradient(cpu.percent)}")
+        cpu_stats.append(clip(cpu.model_name, 24), style=f"bold {palette.text}")
+        cpu_stats.append(f"  CPU {cpu.percent:4.0f}%", style=f"bold {palette.gradient(cpu.percent)}")
         cpu_stats.append(f"  {freq}", style=palette.text)
         cpu_stats.append(temp, style=palette.orange)
         cpu_stats.append(
@@ -629,8 +652,12 @@ class OmniTop(App):
             style=palette.dim,
         )
         self.query_one("#cpu-stats", OneLine).update_text(cpu_stats)
-        self.query_one("#cpu-graph", HistoryGraph).update_data(cpu.history, maximum=100)
-        self.query_one("#cpu-cores", CoreBars).update_data(cpu.per_core)
+        self.query_one("#cpu-graph", HistoryGraph).update_data(
+            cpu.user_history, maximum=100, secondary=cpu.history
+        )
+        self.query_one("#cpu-cores", CoreBars).update_data(
+            cpu.per_core, cpu.core_temps, cpu.core_temp_source
+        )
         self.query_one("#panel-cpu").border_subtitle = f" {cpu.percent:.0f}% "
 
         # Memory.
@@ -639,13 +666,16 @@ class OmniTop(App):
         mem_stats.append(f"{mem.percent:5.1f}%", style=f"bold {palette.gradient(mem.percent)}")
         mem_stats.append(f"  {human_bytes(mem.used)} / {human_bytes(mem.total)}", style=palette.text)
         mem_stats.append(f"  avail {human_bytes(mem.available)}", style=palette.dim)
+        mem_stats.append(f"  cached {human_bytes(mem.cached)}", style=palette.blue)
         if mem.swap_total:
             mem_stats.append(
                 f"  swap {human_bytes(mem.swap_used)}/{human_bytes(mem.swap_total)}",
                 style=palette.dim,
             )
         self.query_one("#mem-stats", OneLine).update_text(mem_stats)
-        self.query_one("#mem-graph", HistoryGraph).update_data(mem.history, maximum=100)
+        self.query_one("#mem-graph", HistoryGraph).update_data(
+            mem.history, maximum=100, secondary=mem.swap_history
+        )
         self.query_one("#panel-mem").border_subtitle = f" {mem.percent:.0f}% "
 
         # Network.
@@ -657,30 +687,21 @@ class OmniTop(App):
         net_stats.append(human_rate(net.tx_rate), style=palette.text)
         net_stats.append(f"  total {human_bytes(net.total_rx)} / {human_bytes(net.total_tx)}", style=palette.faint)
         self.query_one("#net-stats", OneLine).update_text(net_stats)
-        max_net = max(max(net.rx_history or [1]), max(net.tx_history or [1]), 1) * 1.1
+        recent_rx = smooth_series(net.rx_history[-60:] or [1])
+        recent_tx = smooth_series(net.tx_history[-60:] or [1])
+        max_rx = max(max(recent_rx), 1) * 1.1
+        max_tx = max(max(recent_tx), 1) * 1.1
         self.query_one("#net-graph", HistoryGraph).update_data(
-            net.rx_history, maximum=max_net, secondary=net.tx_history
+            net.rx_history,
+            maximum=max_rx,
+            secondary=net.tx_history,
+            secondary_maximum=max_tx,
         )
         self.query_one("#panel-net").border_subtitle = f" ↓{human_bytes(net.rx_rate)}/s "
 
         # Disk.
         disk = snap.disk
-        disk_stats = Text()
-        disk_stats.append("R ", style=palette.yellow)
-        disk_stats.append(human_rate(disk.read_rate), style=palette.text)
-        disk_stats.append("  W ", style=palette.magenta)
-        disk_stats.append(human_rate(disk.write_rate), style=palette.text)
-        if disk.mounts:
-            mount = disk.mounts[0]
-            disk_stats.append(
-                f"  {mount.mount} {mount.percent:.0f}% ({human_bytes(mount.used)}/{human_bytes(mount.total)})",
-                style=palette.dim,
-            )
-        self.query_one("#disk-stats", OneLine).update_text(disk_stats)
-        max_disk = max(max(disk.read_history or [1]), max(disk.write_history or [1]), 1) * 1.1
-        self.query_one("#disk-graph", HistoryGraph).update_data(
-            disk.read_history, maximum=max_disk, secondary=disk.write_history
-        )
+        self.query_one("#disk-panel", DiskPanel).update_data(disk)
         self.query_one("#panel-disk").border_subtitle = f" {human_bytes(disk.read_rate + disk.write_rate)}/s "
 
         # GPU.
@@ -721,6 +742,12 @@ class OmniTop(App):
             f" {sum(1 for s in snap.agents if s.is_active)}/{len(snap.agents)} "
         )
         selected = self._selected_session(snap)
+        self.query_one("#tokens", TokenOverview).update_data(selected, snap.token_rate)
+        token_title = " TOKENS "
+        if selected:
+            token_id = f"{selected.project}/{selected.session_id[:7]}"
+            token_title = f" TOKENS ({truncate_middle(token_id, 28)}) "
+        self.query_one("#panel-tokens").border_title = token_title
         self.query_one("#detail", SessionDetail).update_data(selected)
         if selected:
             self.query_one("#panel-detail").border_subtitle = f" {selected.agent_label} "

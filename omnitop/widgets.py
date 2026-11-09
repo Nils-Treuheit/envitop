@@ -11,18 +11,22 @@ from textual.widget import Widget
 
 from .draw import (
     braille_graph,
+    braille_line_graph,
     clip,
     get_palette,
     human_ago,
     human_bytes,
     human_duration,
+    human_rate,
     human_tokens,
     pct_bar,
+    smooth_series,
+    sparkline,
     status_glyph,
     tiny_bar,
     truncate_middle,
 )
-from .model import AgentSession, GpuState, ProcInfo, RateLimit, Snapshot
+from .model import AgentSession, DiskInfo, GpuState, ProcInfo, RateLimit, Snapshot
 
 
 def _line(parts: Sequence[tuple[str, str]], width: int, base: str = "") -> Text:
@@ -90,7 +94,7 @@ class OneLine(Widget):
 
 
 class HistoryGraph(Widget):
-    """Filled braille graph with a gradient colour scale.
+    """Braille history graph with filled-area and connected-trace styles.
 
     When a secondary series is supplied (and the widget is tall enough) the
     graph is split in two: the primary series on top and the secondary one
@@ -108,27 +112,36 @@ class HistoryGraph(Widget):
         color_mode: str = "value",
         primary_role: str = "accent",
         secondary_role: str = "",
+        graph_style: str = "filled",
+        primary_label: str = "",
+        secondary_label: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.values: list[float] = []
         self.secondary: list[float] = []
         self.maximum = maximum
+        self.secondary_maximum: Optional[float] = None
         self.color_mode = color_mode
         self.primary_role = primary_role
         self.secondary_role = secondary_role
+        self.graph_style = graph_style
+        self.primary_label = primary_label
+        self.secondary_label = secondary_label
 
     def update_data(
         self,
         values: Iterable[float],
         maximum: Optional[float] = None,
         secondary: Optional[Iterable[float]] = None,
+        secondary_maximum: Optional[float] = None,
     ) -> None:
-        self.values = list(values)
+        self.values = smooth_series(list(values))
         if secondary is not None:
-            self.secondary = list(secondary)
+            self.secondary = smooth_series(list(secondary))
         if maximum is not None:
             self.maximum = maximum
+        self.secondary_maximum = secondary_maximum
         self.refresh()
 
     def _combined_max(self) -> Optional[float]:
@@ -145,30 +158,39 @@ class HistoryGraph(Widget):
         h = max(1, self.size.height)
         if self.secondary and h >= 2:
             maximum = self._combined_max()
-            top_h = max(1, h // 2)
-            bottom_h = max(1, h - top_h)
+            show_labels = h >= 4 and (self.primary_label or self.secondary_label)
+            graph_height = h - (2 if show_labels else 0)
+            top_h = max(1, graph_height // 2)
+            bottom_h = max(1, graph_height - top_h)
             primary_colour = getattr(palette, self.primary_role, palette.accent)
             secondary_colour = getattr(palette, self.secondary_role, palette.magenta)
-            lines = braille_graph(
+            graph_fn = braille_line_graph if self.graph_style == "line" else braille_graph
+            lines: list[Text] = []
+            if show_labels and self.primary_label:
+                lines.append(Text(self.primary_label, style=primary_colour))
+            lines.extend(graph_fn(
                 self.values,
                 w,
                 top_h,
                 palette,
                 maximum=maximum,
                 color_by=self.color_mode,
-                solid_color=primary_colour,
-            )
-            lines += braille_graph(
+                solid_color=primary_colour if self.color_mode != "value" else None,
+            ))
+            if show_labels and self.secondary_label:
+                lines.append(Text(self.secondary_label, style=secondary_colour))
+            lines += graph_fn(
                 self.secondary,
                 w,
                 bottom_h,
                 palette,
-                maximum=maximum,
+                maximum=self.secondary_maximum or maximum,
                 color_by=self.color_mode,
-                solid_color=secondary_colour,
+                solid_color=secondary_colour if self.color_mode != "value" else None,
             )
             return _join(lines, w, h)
-        lines = braille_graph(self.values, w, h, palette, maximum=self.maximum, color_by=self.color_mode)
+        graph_fn = braille_line_graph if self.graph_style == "line" else braille_graph
+        lines = graph_fn(self.values, w, h, palette, maximum=self.maximum, color_by=self.color_mode)
         return _join(lines, w, h)
 
 
@@ -176,15 +198,27 @@ class CoreBars(Widget):
     """Compact per-core utilisation grid."""
 
     DEFAULT_CSS = """
-    CoreBars { height: 1fr; min-height: 1; }
+    CoreBars {
+        height: 1fr;
+        min-height: 1;
+    }
     """
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.cores: list[float] = []
+        self.temperatures: list[Optional[float]] = []
+        self.temp_source = ""
 
-    def update_data(self, cores: Iterable[float]) -> None:
+    def update_data(
+        self,
+        cores: Iterable[float],
+        temperatures: Optional[Iterable[Optional[float]]] = None,
+        temp_source: str = "",
+    ) -> None:
         self.cores = list(cores)
+        self.temperatures = list(temperatures or [])
+        self.temp_source = temp_source
         self.refresh()
 
     def render(self) -> Text:
@@ -194,26 +228,31 @@ class CoreBars(Widget):
         cores = self.cores
         if not cores:
             return Text("waiting for samples…", style=palette.dim)
-        cell = 12
+        cell = 14
         cols = max(1, w // cell)
         rows_needed = (len(cores) + cols - 1) // cols
-        lines: list[Text] = []
-        for row in range(min(h, rows_needed)):
-            parts: list[tuple[str, str]] = []
+        temp_label = self.temp_source.upper() if self.temperatures and self.temp_source else "TEMP"
+        header = Text()
+        for _ in range(cols):
+            header.append(f"{'CORE % ' + temp_label:<{cell}}", style=palette.dim)
+        lines: list[Text] = [header]
+        for row in range(min(max(0, h - 1), rows_needed)):
+            line = Text()
             for col in range(cols):
                 idx = row * cols + col
                 if idx >= len(cores):
-                    parts.append((" " * cell, ""))
+                    line.append(" " * cell)
                     continue
                 pct = cores[idx]
-                colour = palette.gradient(pct)
-                parts.append((f"{idx + 1:>2}", palette.dim))
-                parts.append((" ", ""))
-                parts.append(("█" * 4, colour))
-                parts.append((" ", ""))
-                parts.append((f"{pct:>3.0f}", palette.dim))
-                parts.append((" ", ""))
-            lines.append(_line(parts, w))
+                temp = self.temperatures[idx] if idx < len(self.temperatures) else None
+                temp_text = f" {temp:.0f}°" if temp is not None else ""
+                line.append(f"C{idx:<2} ", style=palette.dim)
+                line.append(f"{pct:3.0f}%", style=f"bold {palette.gradient(pct)}")
+                line.append(temp_text, style=palette.orange if temp is not None else palette.dim)
+                padding = cell - 4 - len(f"{pct:3.0f}%") - len(temp_text)
+                if padding > 0:
+                    line.append(" " * padding)
+            lines.append(_pad_text(line, w))
         return _join(lines, w, h)
 
 
@@ -248,7 +287,8 @@ class GpuPanel(Widget):
         for gi, gpu in enumerate(state.gpus):
             this_band = band if gi < n - 1 else max(2, h - band * (n - 1))
             stats_lines = 2 if this_band >= 5 else 1
-            graph_h = max(1, this_band - stats_lines)
+            show_graph_labels = this_band >= 8
+            graph_h = max(1, this_band - stats_lines - (2 if show_graph_labels else 0))
             util_colour = palette.gradient(gpu.util)
             title = Text()
             title.append(f"GPU{gpu.index} ", style=f"bold {palette.accent}")
@@ -301,19 +341,189 @@ class GpuPanel(Widget):
                 row.truncate(w, overflow="crop")
                 lines.append(row)
 
+            # Match nvitop's paired utilization and memory history regions.
+            perf_h = max(1, graph_h // 2)
+            mem_h = max(1, graph_h - perf_h)
+            if show_graph_labels:
+                lines.append(Text("GPU UTIL", style=palette.dim))
             graph = braille_graph(
-                gpu.history,
+                smooth_series(gpu.history),
                 w,
-                graph_h,
+                perf_h,
                 palette,
                 maximum=100,
                 color_by="value",
             )
             lines.extend(graph)
+            if show_graph_labels:
+                lines.append(Text("VRAM", style=palette.dim))
+            lines.extend(
+                braille_graph(
+                    smooth_series(gpu.mem_history),
+                    w,
+                    mem_h,
+                    palette,
+                    maximum=100,
+                    color_by="value",
+                )
+            )
             if gi < n - 1:
                 # Replace the last line with a separator if the band is tiny.
                 if this_band <= 2:
                     lines.append(Text("─" * w, style=palette.faint))
+        return _join(lines, w, h)
+
+
+class DiskPanel(Widget):
+    """Per-partition capacity and read/write activity histories."""
+
+    DEFAULT_CSS = """
+    DiskPanel { height: 1fr; min-height: 2; }
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.disk = DiskInfo()
+
+    def update_data(self, disk: DiskInfo) -> None:
+        self.disk = disk
+        self.refresh()
+
+    @staticmethod
+    def _shared_io_graph(read_values, write_values, width: int, scale: float) -> Text:
+        """Draw recent reads and writes side by side on one shared scale."""
+        width = max(1, width)
+        count = max(1, width // 2)
+        glyphs = "▁▂▃▄▅▆▇█"
+
+        def sample(values):
+            values = list(values)[-60:]
+            if len(values) > count:
+                length = len(values)
+                values = [
+                    max(values[int(i * length / count): max(int(i * length / count) + 1, int((i + 1) * length / count))])
+                    for i in range(count)
+                ]
+            if len(values) < count:
+                values = [0.0] * (count - len(values)) + values
+            return values
+
+        reads = sample(read_values)
+        writes = sample(write_values)
+        graph = Text()
+        for read_value, write_value in zip(reads, writes):
+            read_level = min(7, round(max(0.0, read_value) / scale * 7))
+            write_level = min(7, round(max(0.0, write_value) / scale * 7))
+            graph.append(" " if read_value <= 0 else glyphs[read_level], style=get_palette().yellow)
+            graph.append(" " if write_value <= 0 else glyphs[write_level], style=get_palette().magenta)
+        if graph.cell_len < width:
+            graph.append(" " * (width - graph.cell_len))
+        graph.truncate(width, overflow="crop")
+        return graph
+
+    def render(self) -> Text:
+        palette = get_palette()
+        w = max(1, self.size.width)
+        h = max(1, self.size.height)
+        disk = self.disk
+        compact = w < 104
+        if compact:
+            summary_parts = [
+                ("R ", palette.yellow),
+                (human_rate(disk.read_rate), palette.text),
+                ("  W ", palette.magenta),
+                (human_rate(disk.write_rate), palette.text),
+                (f"  {len(disk.mounts)} partitions", palette.dim),
+                (" · shared scale", palette.faint),
+            ]
+        else:
+            summary_parts = [
+                ("R ", palette.yellow),
+                (human_rate(disk.read_rate), palette.text),
+                ("  W ", palette.magenta),
+                (human_rate(disk.write_rate), palette.text),
+                (f"  {len(disk.mounts)} partitions", palette.dim),
+                (" · peak is last 60s", palette.faint),
+            ]
+        lines = [
+            _line(
+                summary_parts,
+                w,
+            )
+        ]
+        if not disk.mounts:
+            lines.append(Text("No mounted partitions found", style=palette.dim))
+        mount_w = max(10, min(16, max((len(m.mount) for m in disk.mounts), default=9)))
+        capacity_w = max(
+            13,
+            min(18, max((len(f"{human_bytes(m.used)}/{human_bytes(m.total)}") for m in disk.mounts), default=10)),
+        )
+        free_w = max(8, min(10, max((len(human_bytes(m.free)) for m in disk.mounts), default=4)))
+        if compact:
+            mount_w = max(8, min(12, max((len(m.mount) for m in disk.mounts), default=8)))
+            capacity_w = max(11, min(15, max((len(f"{human_bytes(m.used)}/{human_bytes(m.total)}") for m in disk.mounts), default=11)))
+            free_w = max(6, min(9, max((len(human_bytes(m.free)) for m in disk.mounts), default=4)))
+            rate_w = min(10, max(6, (w - mount_w - capacity_w - free_w - 12) // 2))
+            graph_w = max(1, w - mount_w - capacity_w - free_w - 4 - rate_w * 2)
+            header = Text()
+            header.append(f"{'PARTITION':<{mount_w}} ", style=palette.dim)
+            header.append(f"{'USED/TOTAL':<{capacity_w}} ", style=palette.dim)
+            header.append(f"{'FREE':<{free_w}} ", style=palette.dim)
+            header.append(f"{'READ/WRITE':<{graph_w}} ", style=palette.accent)
+            header.append(f"{'READ/s':>{rate_w}} ", style=palette.yellow)
+            header.append(f"{'WRITE/s':>{rate_w}}", style=palette.magenta)
+            lines.append(_pad_text(header, w))
+            scale = max(
+                (
+                    max(m.read_rate, m.write_rate, *(m.read_history[-60:] or [0.0]), *(m.write_history[-60:] or [0.0]))
+                    for m in disk.mounts
+                ),
+                default=0.0,
+            ) * 1.05 or 1.0
+            for mount in disk.mounts[: max(0, h - 2)]:
+                row = Text()
+                row.append(f"{clip(mount.mount, mount_w - 1):<{mount_w}} ", style=f"bold {palette.text}")
+                usage = f"{human_bytes(mount.used)}/{human_bytes(mount.total)}"
+                row.append(f"{usage:<{capacity_w}} ", style=palette.text)
+                row.append(f"{human_bytes(mount.free):<{free_w}} ", style=palette.faint)
+                row.append_text(
+                    self._shared_io_graph(mount.read_history[-60:], mount.write_history[-60:], graph_w, scale)
+                )
+                row.append(" ")
+                row.append(f"{human_rate(mount.read_rate):>{rate_w}}", style=palette.yellow)
+                row.append(f"{human_rate(mount.write_rate):>{rate_w}}", style=palette.magenta)
+                lines.append(_pad_text(row, w))
+            return _join(lines, w, h)
+        rate_w = max(16, (w - mount_w - capacity_w - free_w - 1) // 2)
+        # Give the history traces most of each rate column while preserving
+        # enough room for the aligned current/peak figures.
+        spark_w = max(5, min(14, rate_w - 11))
+        header = Text()
+        header.append(f"{'PARTITION':<{mount_w}}", style=palette.dim)
+        header.append(f"{'USED/TOTAL':<{capacity_w}}", style=palette.dim)
+        header.append(f"{'FREE':<{free_w}}", style=palette.dim)
+        header.append(f"{'READ/s NOW/PEAK':<{rate_w}}", style=palette.yellow)
+        header.append(" ")
+        header.append("WRITE/s NOW/PEAK", style=palette.magenta)
+        lines.append(_pad_text(header, w))
+        for mount in disk.mounts[: max(0, h - 2)]:
+            row = Text()
+            row.append(f"{clip(mount.mount, mount_w - 1):<{mount_w}}", style=f"bold {palette.text}")
+            usage = f"{human_bytes(mount.used)}/{human_bytes(mount.total)}"
+            row.append(f"{usage:<{capacity_w}}", style=palette.text)
+            row.append(f"{human_bytes(mount.free):<{free_w}}", style=palette.faint)
+            read_history = mount.read_history[-60:] or [0.0]
+            write_history = mount.write_history[-60:] or [0.0]
+            read_peak = max(read_history, default=0.0)
+            write_peak = max(write_history, default=0.0)
+            read = f"{human_bytes(mount.read_rate)}/{human_bytes(read_peak)}"
+            write = f"{human_bytes(mount.write_rate)}/{human_bytes(write_peak)}"
+            row.append(sparkline(smooth_series(read_history), spark_w), style=palette.yellow)
+            row.append(f"{read:>{rate_w - spark_w}}", style=palette.text)
+            row.append(" ")
+            row.append(sparkline(smooth_series(write_history), spark_w), style=palette.magenta)
+            row.append(f"{write:>{rate_w - spark_w}}", style=palette.text)
+            lines.append(_pad_text(row, w))
         return _join(lines, w, h)
 
 
@@ -328,7 +538,10 @@ class GpuProcTable(Widget):
         self.selected = 0
 
     def update_data(self, processes, selected: int) -> None:
-        self.processes = processes
+        next_processes = list(processes)
+        if self.processes == next_processes and self.selected == selected:
+            return
+        self.processes = next_processes
         self.selected = selected
         self.refresh()
 
@@ -534,6 +747,74 @@ class AgentTable(Widget):
                 row.append(" " * (w - row.cell_len))
             row.truncate(w, overflow="crop")
             lines.append(row)
+        return _join(lines, w, h)
+
+
+class TokenOverview(Widget):
+    """abtop-style token usage for the selected agent session."""
+
+    DEFAULT_CSS = """
+    TokenOverview { height: 1fr; min-height: 1; }
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.session: Optional[AgentSession] = None
+        self.token_rate = 0.0
+
+    def update_data(self, session: Optional[AgentSession], token_rate: float) -> None:
+        self.session = session
+        self.token_rate = token_rate
+        self.refresh()
+
+    def render(self) -> Text:
+        palette = get_palette()
+        w = max(1, self.size.width)
+        h = max(1, self.size.height)
+        session = self.session
+        if session is None:
+            return _join([Text("select an agent session to inspect tokens", style=palette.dim)], w, h)
+        total = session.total_tokens
+        lines = [_line([
+            (f"Total: {human_tokens(total)}", f"bold {palette.text}"),
+            (f"    {human_tokens(self.token_rate * 60)}/min", f"bold {palette.green}"),
+        ], w)]
+        rows = (
+            ("Input", session.input_tokens),
+            ("Output", session.output_tokens),
+            ("CacheR", session.cache_read),
+            ("CacheW", session.cache_write),
+        )
+        bar_w = max(4, min(20, w - 20))
+        for label, value in rows:
+            if len(lines) >= h:
+                break
+            row = Text()
+            row.append(f"{label:<8}: ", style=palette.dim)
+            pct = value / total * 100 if total else 0.0
+            row.append_text(pct_bar(pct, bar_w, palette))
+            row.append(f" {human_tokens(value)}", style=palette.text)
+            lines.append(_pad_text(row, w))
+        if h >= 7 and len(lines) < h:
+            values = session.token_history or [0]
+            graph = braille_graph(
+                values,
+                max(1, w - 14),
+                2,
+                palette,
+                maximum=max(values) * 1.1 or 1.0,
+                color_by="value",
+            )
+            trend = Text("tokens/turn ", style=palette.dim)
+            trend.append_text(graph[0])
+            lines.append(_pad_text(trend, w))
+            lines.append(_pad_text(graph[1], w))
+        if len(lines) < h:
+            avg = total / session.turn_count if session.turn_count else 0
+            lines.append(_line([
+                (f"Turns: {session.turn_count}", palette.dim),
+                (f"   Avg: {human_tokens(avg)}/t", palette.dim),
+            ], w))
         return _join(lines, w, h)
 
 

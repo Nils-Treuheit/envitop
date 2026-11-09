@@ -12,14 +12,19 @@ from typing import Optional
 
 @dataclass
 class CpuInfo:
+    model_name: str = ""
     percent: float = 0.0
+    user_percent: float = 0.0
     per_core: list[float] = field(default_factory=list)
+    core_temps: list[Optional[float]] = field(default_factory=list)
+    core_temp_source: str = ""
     freq_mhz: float = 0.0
     temp_c: Optional[float] = None
     load1: float = 0.0
     load5: float = 0.0
     load15: float = 0.0
     history: list[float] = field(default_factory=list)
+    user_history: list[float] = field(default_factory=list)
     core_history: list[list[float]] = field(default_factory=list)
 
 
@@ -35,6 +40,7 @@ class MemInfo:
     swap_used: int = 0
     swap_percent: float = 0.0
     history: list[float] = field(default_factory=list)
+    swap_history: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -53,6 +59,12 @@ class MountInfo:
     used: int
     total: int
     percent: float
+    free: int = 0
+    device: str = ""
+    read_rate: float = 0.0
+    write_rate: float = 0.0
+    read_history: list[float] = field(default_factory=list)
+    write_history: list[float] = field(default_factory=list)
 
 
 @dataclass
