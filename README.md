@@ -4,7 +4,9 @@ A single terminal dashboard that looks like [btop](https://github.com/aristocrat
 shows NVIDIA GPUs like [nvitop](https://github.com/XuehaiPan/nvitop), and tracks local AI
 coding agents like [abtop](https://github.com/abtop-dev/abtop).
 
-![envitop dashboard showing CPU, memory, network, disk, GPU processes, tokens and active agents](https://raw.githubusercontent.com/Nils-Treuheit/envitop/main/docs/envitop-demo.svg)
+![Animated tour of EnviTop's Overview, CPU, GPU, Net, Memory, Procs, and Agents tabs](docs/envitop-tabs.gif)
+
+The animation shows each tab for two seconds at 24 frames per second, using one continuous simulated system.
 
 ```
 ┌ CPU ──────────────────────┐┌ GPU ──────────────────────────┐┌ AI AGENTS ─────────────────────┐
@@ -54,6 +56,16 @@ coding agents like [abtop](https://github.com/abtop-dev/abtop).
 - **Read-only by default** — no API keys or external network requests. The Net
   tab sends bounded `HEAD` requests only to local listening web services.
   Other data comes from `/proc`, `psutil`, `nvidia-smi` and local transcript files.
+
+## Tab guide
+
+Press `0`–`6` to open a tab. The [tab guide](docs/tabs/README.md) describes
+what each view shows and links to a focused page for each one.
+
+## Related project
+
+[Syswatch](https://github.com/matthart1983/syswatch/tree/main) is a related
+system-monitoring project.
 
 ## Requirements
 
@@ -207,16 +219,18 @@ Project layout:
 
 ```
 envitop/
-  app.py                 Textual app, layout, keys, kill flow
-  widgets.py             panels, graphs, tables, header/footer
-  draw.py                palettes, formatting, bars, braille graphs
-  model.py               shared dataclasses
-  sampler.py             background sampling thread
-  demo.py                synthetic data source
-  collectors/system.py   psutil collectors
-  collectors/gpu.py      nvidia-smi collectors
-  collectors/agents.py   Claude/Codex/OpenCode/rate-limit collectors
-  cli.py                 argparse entry point
+  app.py                  Textual app, layout, keys, and actions
+  app.tcss                dashboard styles
+  widgets/                tab panels, graphs, tables, header/footer
+  draw/                   palettes, formatting, bars, and graphs
+  model.py                shared dataclasses
+  sampler.py              background sampling thread
+  demo.py                 synthetic data source
+  collectors/             system, GPU, Claude, Codex, and OpenCode sources
+demo/
+  generate_demo.py        animated tab-tour generator
+docs/
+  tabs/                   guide to each dashboard tab
 ```
 
 ## Notes and limitations

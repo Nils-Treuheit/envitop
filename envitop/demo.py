@@ -28,10 +28,12 @@ MB = 1024**2
 
 
 class DemoSource:
-    def __init__(self, scope: str = "recent") -> None:
+    def __init__(self, scope: str = "recent", *, step_seconds: float = 0.5, smooth: bool = False) -> None:
         self.t = 0.0
         self.paused = False
         self.scope = scope
+        self.step_seconds = step_seconds
+        self.smooth = smooth
         self.selected_id = ""
         self._cpu_hist: deque[float] = deque(maxlen=240)
         self._gpu_hist: deque[float] = deque(maxlen=240)
@@ -42,6 +44,13 @@ class DemoSource:
         self._read_hist: deque[float] = deque(maxlen=240)
         self._write_hist: deque[float] = deque(maxlen=240)
         self._seed_history()
+
+    def _variation(self, amplitude: float, phase: float = 0.0, *, centered: bool = False) -> float:
+        if not self.smooth:
+            low = -amplitude if centered else 0.0
+            return random.uniform(low, amplitude)
+        wave = math.sin(self.t * 2.7 + phase)
+        return amplitude * (wave if centered else (wave + 1) / 2)
 
     def _seed_history(self) -> None:
         """Pre-fill graphs so the first frame already looks like btop."""
@@ -88,29 +97,36 @@ class DemoSource:
 
     def snapshot(self) -> Snapshot:
         if not self.paused:
-            self.t += 0.5
+            self.t += self.step_seconds
         t = self.t
         now = time.time()
         cpu_total, mem_pct, gpu_util, vram_pct, rx, tx, read, write = self._signals(t)
         cores = []
         for i in range(24):
-            cores.append(max(1, min(100, cpu_total + 24 * math.sin(t / 5 + i * 0.7) + random.uniform(-6, 6))))
+            cores.append(
+                max(
+                    1,
+                    min(
+                        100, cpu_total + 24 * math.sin(t / 5 + i * 0.7) + self._variation(6, i, centered=True)
+                    ),
+                )
+            )
         if not self.paused:
             self._cpu_hist.append(cpu_total)
         if not self.paused:
             self._mem_hist.append(mem_pct)
-        gpu_util += random.uniform(-3, 3)
+        gpu_util += self._variation(3, 1.3, centered=True)
         gpu_util = max(0, min(100, gpu_util))
         if not self.paused:
             self._gpu_hist.append(gpu_util)
             self._vram_hist.append(vram_pct)
-        rx = max(0, rx * MB + random.uniform(0, 0.8 * MB))
-        tx = max(0, tx * MB + random.uniform(0, 0.3 * MB))
+        rx = max(0, rx * MB + self._variation(0.8 * MB, 0.5 * math.pi))
+        tx = max(0, tx * MB + self._variation(0.3 * MB, math.pi))
         if not self.paused:
             self._rx_hist.append(rx)
             self._tx_hist.append(tx)
-            self._read_hist.append(max(0, read * MB + random.uniform(0, 1.2 * MB)))
-            self._write_hist.append(max(0, write * MB + random.uniform(0, 0.8 * MB)))
+            self._read_hist.append(max(0, read * MB + self._variation(1.2 * MB, 2 * math.pi / 3)))
+            self._write_hist.append(max(0, write * MB + self._variation(0.8 * MB, 5 * math.pi / 3)))
 
         cpu = CpuInfo(
             percent=cpu_total,
