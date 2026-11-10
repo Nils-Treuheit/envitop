@@ -177,3 +177,15 @@ envitop/
   devices, drivers, or MIG configurations.
 - The UI targets modern UTF-8 terminals with braille glyph support. A Nerd Font
   is not required.
+
+## Native C++ Linux build
+
+The native implementation uses Linux procfs/sysfs plus system `ncursesw`, SQLite3, and the installed `nlohmann-json` header. It does not launch Python or require network installation.
+
+```bash
+./build-cpp.sh
+./build/envitop-cpp
+./build/envitop-cpp --once --json
+```
+
+The snapshot output follows the Python model's field names. CPU, memory, network, storage, process, and NVIDIA GPU metrics come from live system sources. Claude, Codex, and OpenCode token totals are read locally. The native agent collector currently omits the baseline's task summaries, child-process details, and rate-limit data. OpenCode context capacity is estimated. Hardware-specific readings depend on available Linux sensors and NVIDIA tools.
