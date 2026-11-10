@@ -36,7 +36,7 @@ extensions = {
     ".jsx": "JavaScript", ".ts": "TypeScript", ".tsx": "TypeScript",
     ".go": "Go", ".java": "Java", ".rb": "Ruby", ".yml": "YAML",
     ".yaml": "YAML", ".html": "HTML", ".css": "CSS", ".sql": "SQL",
-    ".ps1": "PowerShell", ".cmake": "CMake",
+    ".ps1": "PowerShell", ".cmake": "CMake", ".tcss": "CSS",
 }
 hash_comments = {"Python", "Shell", "TOML", "YAML", "Ruby", "PowerShell"}
 slash_comments = {"C++", "C", "Rust", "JavaScript", "TypeScript", "Go", "Java", "CSS", "SQL", "CMake"}
@@ -44,7 +44,7 @@ totals = defaultdict(lambda: [0, 0, 0, 0])  # files, code, comments, blank
 
 if (root / ".git").exists():
     tracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--cached", "-z"],
+        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
         check=True,
         capture_output=True,
     ).stdout
@@ -142,7 +142,7 @@ print(
     f"{sum(v[2] for v in totals.values()):>10} "
     f"{sum(v[3] for v in totals.values()):>10}"
 )
-print("Counts tracked files, excluding blank lines, full-line comments, and Python docstrings.")
+print("Counts tracked and non-ignored untracked files; blanks, comments, and Python docstrings are excluded.")
 print("Inline comments remain part of code lines.")
 print("check_code_lines.sh is excluded from the totals.")
 PY

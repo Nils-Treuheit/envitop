@@ -42,6 +42,9 @@ Issues = "https://github.com/Nils-Treuheit/envitop/issues"
 [tool.setuptools.packages.find]
 include = ["envitop*"]
 
+[tool.setuptools.package-data]
+envitop = ["app.tcss"]
+
 [tool.ruff]
 target-version = "py39"
 line-length = 110

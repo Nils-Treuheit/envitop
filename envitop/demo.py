@@ -47,26 +47,28 @@ class DemoSource:
         """Pre-fill graphs so the first frame already looks like btop."""
         for i in range(120):
             t = -0.5 * (120 - i)
-            self._cpu_hist.append(
-                42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95)
-            )
-            self._mem_hist.append(46 + 8 * math.sin(t / 18) + 3 * math.sin(t / 4.2))
-            gpu = 54 + 27 * math.sin(t / 8) + 17 * math.sin(t / 2.3)
-            gpu += 16 * max(0.0, math.sin(t / 11)) ** 10
+            cpu, memory, gpu, vram, rx, tx, read, write = self._signals(t)
+            self._cpu_hist.append(cpu)
+            self._mem_hist.append(memory)
             self._gpu_hist.append(max(0, min(100, gpu)))
-            self._vram_hist.append(66 + 5 * math.sin(t / 14) + 3 * math.sin(t / 3.1))
-            rx = 0.6 + 6.0 * max(0.0, math.sin(t / 4.1)) ** 1.6
-            rx += 3.0 * max(0.0, math.sin(t / 1.5 + 0.8)) ** 4
-            tx = 0.2 + 2.2 * max(0.0, math.sin(t / 3.3 + 1.1)) ** 2.4
-            tx += 1.6 * max(0.0, math.sin(t / 1.25)) ** 5
+            self._vram_hist.append(vram)
             self._rx_hist.append(rx * MB)
             self._tx_hist.append(tx * MB)
-            read = 4 + 34 * max(0.0, math.sin(t / 5.1)) ** 6
-            read += 16 * max(0.0, math.sin(t / 1.7 + 1)) ** 8
-            write = 2 + 21 * max(0.0, math.sin(t / 4.2 + 1.4)) ** 7
-            write += 12 * max(0.0, math.sin(t / 1.35 + 0.5)) ** 8
             self._read_hist.append(read * MB)
             self._write_hist.append(write * MB)
+
+    @staticmethod
+    def _signals(t: float) -> tuple[float, ...]:
+        pulse = lambda divisor, power, phase=0: max(0.0, math.sin(t / divisor + phase)) ** power
+        cpu = 42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95)
+        gpu = 54 + 27 * math.sin(t / 8) + 17 * math.sin(t / 2.3) + 16 * pulse(11, 10)
+        rx = 0.6 + 6 * pulse(4.1, 1.6) + 3 * pulse(1.5, 4, 0.8)
+        tx = 0.2 + 2.2 * pulse(3.3, 2.4, 1.1) + 1.6 * pulse(1.25, 5)
+        read = 4 + 34 * pulse(5.1, 6) + 16 * pulse(1.7, 8, 1)
+        write = 2 + 21 * pulse(4.2, 7, 1.4) + 12 * pulse(1.35, 8, 0.5)
+        memory = 46 + 8 * math.sin(t / 18) + 3 * math.sin(t / 4.2)
+        vram = 66 + 5 * math.sin(t / 14) + 3 * math.sin(t / 3.1)
+        return cpu, memory, gpu, vram, rx, tx, read, write
 
     # API used by the app -------------------------------------------------
     def start(self) -> None:
@@ -89,35 +91,24 @@ class DemoSource:
             self.t += 0.5
         t = self.t
         now = time.time()
-        cpu_total = 42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95)
+        cpu_total, mem_pct, gpu_util, vram_pct, rx, tx, read, write = self._signals(t)
         cores = []
         for i in range(24):
             cores.append(max(1, min(100, cpu_total + 24 * math.sin(t / 5 + i * 0.7) + random.uniform(-6, 6))))
         if not self.paused:
             self._cpu_hist.append(cpu_total)
-        mem_pct = 46 + 8 * math.sin(t / 18) + 3 * math.sin(t / 4.2)
         if not self.paused:
             self._mem_hist.append(mem_pct)
-        gpu_util = 54 + 27 * math.sin(t / 8) + 17 * math.sin(t / 2.3)
-        gpu_util += 16 * max(0.0, math.sin(t / 11)) ** 10 + random.uniform(-3, 3)
+        gpu_util += random.uniform(-3, 3)
         gpu_util = max(0, min(100, gpu_util))
-        vram_pct = 66 + 5 * math.sin(t / 14) + 3 * math.sin(t / 3.1)
         if not self.paused:
             self._gpu_hist.append(gpu_util)
             self._vram_hist.append(vram_pct)
-        rx = 0.6 + 6.0 * max(0.0, math.sin(t / 4.1)) ** 1.6
-        rx += 3.0 * max(0.0, math.sin(t / 1.5 + 0.8)) ** 4
-        tx = 0.2 + 2.2 * max(0.0, math.sin(t / 3.3 + 1.1)) ** 2.4
-        tx += 1.6 * max(0.0, math.sin(t / 1.25)) ** 5
         rx = max(0, rx * MB + random.uniform(0, 0.8 * MB))
         tx = max(0, tx * MB + random.uniform(0, 0.3 * MB))
         if not self.paused:
             self._rx_hist.append(rx)
             self._tx_hist.append(tx)
-            read = 4 + 34 * max(0.0, math.sin(t / 5.1)) ** 6
-            read += 16 * max(0.0, math.sin(t / 1.7 + 1)) ** 8
-            write = 2 + 21 * max(0.0, math.sin(t / 4.2 + 1.4)) ** 7
-            write += 12 * max(0.0, math.sin(t / 1.35 + 0.5)) ** 8
             self._read_hist.append(max(0, read * MB + random.uniform(0, 1.2 * MB)))
             self._write_hist.append(max(0, write * MB + random.uniform(0, 0.8 * MB)))
 
