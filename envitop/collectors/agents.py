@@ -26,6 +26,7 @@ from typing import Any, Iterable, Optional
 import psutil
 
 from ..model import AgentSession, ChildProc, ProcInfo, RateLimit
+import contextlib
 
 HOME = Path.home()
 SUMMARIES_FILE = HOME / ".cache" / "abtop" / "summaries.json"
@@ -33,10 +34,8 @@ CODEX_CACHE = HOME / ".cache" / "abtop" / "codex-rate-limits.json"
 CLAUDE_DIRS = [HOME / ".claude"]
 if os.environ.get("CLAUDE_CONFIG_DIR"):
     CLAUDE_DIRS.insert(0, Path(os.environ["CLAUDE_CONFIG_DIR"]))
-try:
+with contextlib.suppress(Exception):
     CLAUDE_DIRS.extend(sorted(HOME.glob(".claude-*")))
-except Exception:
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -598,9 +597,7 @@ class OpenCodeCollector:
             pass
         self._conn = None
 
-    def sessions(
-        self, cutoff: float, limit: int = 30, selected_id: str = ""
-    ) -> list[AgentSession]:
+    def sessions(self, cutoff: float, limit: int = 30, selected_id: str = "") -> list[AgentSession]:
         conn = self._connect()
         if conn is None:
             return []
@@ -694,8 +691,7 @@ class OpenCodeCollector:
         try:
             limit = 256 if include_turn_history else 24
             rows = conn.execute(
-                "SELECT data FROM message WHERE session_id = ? "
-                "ORDER BY time_created DESC LIMIT ?",
+                "SELECT data FROM message WHERE session_id = ? ORDER BY time_created DESC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
         except sqlite3.Error:
@@ -717,9 +713,7 @@ class OpenCodeCollector:
             cache = tokens.get("cache") or {}
             last_tokens = _opencode_message_tokens(tokens)
             context_tokens = (
-                int(tokens.get("input") or 0)
-                + int(cache.get("read") or 0)
-                + int(cache.get("write") or 0)
+                int(tokens.get("input") or 0) + int(cache.get("read") or 0) + int(cache.get("write") or 0)
             )
             break
 
@@ -743,16 +737,17 @@ class OpenCodeCollector:
             if in_turn and has_assistant:
                 turn_history.append(turn_tokens)
             try:
-                turn_count = int(conn.execute(
-                    "SELECT COUNT(*) FROM message "
-                    "WHERE session_id = ? AND json_extract(data, '$.role') = 'user'",
-                    (session_id,),
-                ).fetchone()[0])
+                turn_count = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM message "
+                        "WHERE session_id = ? AND json_extract(data, '$.role') = 'user'",
+                        (session_id,),
+                    ).fetchone()[0]
+                )
             except sqlite3.Error:
                 turn_count = sum(1 for data in parsed if data.get("role") == "user")
             turn_history = turn_history[-32:]
         return last_tokens, context_tokens, "", turn_count, turn_history
-
 
     def details(self, session_id: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]], str]:
         """Return (chat, tools, current task) for one session."""
@@ -1150,7 +1145,9 @@ class AgentCollector:
                     if current:
                         session.current_task = current
 
-    def _children(self, session: AgentSession, procs: dict[int, ProcInfo], limit: int = 10) -> list[ChildProc]:
+    def _children(
+        self, session: AgentSession, procs: dict[int, ProcInfo], limit: int = 10
+    ) -> list[ChildProc]:
         if not session.pid:
             return []
         children_map = build_children_map(procs)

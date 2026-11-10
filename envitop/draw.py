@@ -262,8 +262,7 @@ def sparkline(values: Sequence[float], width: int = 4) -> str:
     elif len(vals) > width:
         count = len(vals)
         vals = [
-            max(vals[int(i * count / width): max(int(i * count / width) + 1,
-                                                  int((i + 1) * count / width))])
+            max(vals[int(i * count / width) : max(int(i * count / width) + 1, int((i + 1) * count / width))])
             for i in range(width)
         ]
     peak = max(vals) or 1.0
@@ -278,8 +277,8 @@ def smooth_series(values: Sequence[float], window: int = 3) -> list[float]:
         return vals
     radius = max(1, window // 2)
     return [
-        sum(vals[max(0, i - radius): min(len(vals), i + radius + 1)])
-        / len(vals[max(0, i - radius): min(len(vals), i + radius + 1)])
+        sum(vals[max(0, i - radius) : min(len(vals), i + radius + 1)])
+        / len(vals[max(0, i - radius) : min(len(vals), i + radius + 1)])
         for i in range(len(vals))
     ]
 
@@ -477,8 +476,15 @@ def braille_stacked_graph(
     layer_count = len(series)
     if not layer_count:
         return [Text(" " * width) for _ in range(height)]
-    palette_colors = colors or (palette.green, palette.cyan, palette.yellow, palette.magenta,
-                                palette.blue, palette.orange, palette.red)
+    palette_colors = colors or (
+        palette.green,
+        palette.cyan,
+        palette.yellow,
+        palette.magenta,
+        palette.blue,
+        palette.orange,
+        palette.red,
+    )
     layer_colors = [palette_colors[i % len(palette_colors)] for i in range(layer_count)]
     normalized: list[list[float]] = []
     for source in series:
@@ -486,10 +492,14 @@ def braille_stacked_graph(
         if len(values) > point_count:
             count = len(values)
             values = [
-                max(values[int(i * count / point_count):max(
-                    int(i * count / point_count) + 1,
-                    int((i + 1) * count / point_count),
-                )])
+                max(
+                    values[
+                        int(i * count / point_count) : max(
+                            int(i * count / point_count) + 1,
+                            int((i + 1) * count / point_count),
+                        )
+                    ]
+                )
                 for i in range(point_count)
             ]
         elif len(values) < point_count:
@@ -557,8 +567,13 @@ def braille_line_graph(
     elif len(vals) > point_count:
         count = len(vals)
         vals = [
-            max(vals[int(i * count / point_count): max(int(i * count / point_count) + 1,
-                                                         int((i + 1) * count / point_count))])
+            max(
+                vals[
+                    int(i * count / point_count) : max(
+                        int(i * count / point_count) + 1, int((i + 1) * count / point_count)
+                    )
+                ]
+            )
             for i in range(point_count)
         ]
     maximum = max(maximum if maximum is not None else max(vals), 1e-9)

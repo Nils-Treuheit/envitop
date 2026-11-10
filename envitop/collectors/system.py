@@ -28,6 +28,7 @@ from ..model import (
     NetProcessInfo,
     ProcInfo,
 )
+import contextlib
 
 
 def _read_first(path: str) -> str:
@@ -40,7 +41,7 @@ def _read_first(path: str) -> str:
 
 def _endpoint_ip(endpoint: str) -> str:
     if endpoint.startswith("[") and "]" in endpoint:
-        return endpoint[1:endpoint.index("]")].split("%", 1)[0]
+        return endpoint[1 : endpoint.index("]")].split("%", 1)[0]
     host, separator, _port = endpoint.rpartition(":")
     return (host if separator else endpoint).split("%", 1)[0]
 
@@ -79,7 +80,9 @@ class SystemCollector:
         self._proc_index: dict[int, ProcInfo] = {}
         self._logical_cpus = max(1, psutil.cpu_count(logical=True) or 1)
         self.hostname = socket.gethostname()
-        self.username = _read_first("/proc/self/loginuid") == "4294967295" and "" or os.environ.get("USER", "")
+        self.username = (
+            _read_first("/proc/self/loginuid") == "4294967295" and "" or os.environ.get("USER", "")
+        )
         if not self.username:
             try:
                 self.username = psutil.Process().username()
@@ -92,10 +95,8 @@ class SystemCollector:
             self.kernel = ""
         self.cpu_model = self._cpu_model()
         # Prime psutil's per-core counters so the first visible sample is real.
-        try:
+        with contextlib.suppress(Exception):
             psutil.cpu_percent(interval=0.05, percpu=True)
-        except Exception:
-            pass
 
     # -- helpers ---------------------------------------------------------
 
@@ -137,7 +138,9 @@ class SystemCollector:
             count = psutil.cpu_count(logical=True) or max(ccds) * 6
             ordered = sorted(ccds.items())
             self._core_temp_source = "CCD"
-            return [ordered[min(len(ordered) - 1, index * len(ordered) // count)][1] for index in range(count)]
+            return [
+                ordered[min(len(ordered) - 1, index * len(ordered) // count)][1] for index in range(count)
+            ]
         self._core_temp_source = ""
         return []
 
@@ -187,8 +190,20 @@ class SystemCollector:
         except Exception:
             parts = []
         skip_fs = {
-            "tmpfs", "devtmpfs", "squashfs", "overlay", "proc", "sysfs", "cgroup",
-            "cgroup2", "devpts", "ramfs", "iso9660", "autofs", "efivarfs", "fusectl",
+            "tmpfs",
+            "devtmpfs",
+            "squashfs",
+            "overlay",
+            "proc",
+            "sysfs",
+            "cgroup",
+            "cgroup2",
+            "devpts",
+            "ramfs",
+            "iso9660",
+            "autofs",
+            "efivarfs",
+            "fusectl",
         }
         for part in parts:
             mount = part.mountpoint
@@ -263,8 +278,8 @@ class SystemCollector:
             read_history, write_history = self._mount_history.setdefault(mount.mount, ([], []))
             read_history.append(read_rate)
             write_history.append(write_rate)
-            del read_history[:-self.HISTORY]
-            del write_history[:-self.HISTORY]
+            del read_history[: -self.HISTORY]
+            del write_history[: -self.HISTORY]
             sampled.append(
                 MountInfo(
                     mount=mount.mount,
@@ -290,8 +305,17 @@ class SystemCollector:
     def processes(self, limit: int = 90) -> tuple[list[ProcInfo], dict[int, ProcInfo]]:
         result: list[ProcInfo] = []
         attrs = [
-            "pid", "name", "username", "cpu_percent", "memory_percent",
-            "memory_info", "cmdline", "status", "num_threads", "ppid", "create_time",
+            "pid",
+            "name",
+            "username",
+            "cpu_percent",
+            "memory_percent",
+            "memory_info",
+            "cmdline",
+            "status",
+            "num_threads",
+            "ppid",
+            "create_time",
         ]
         for proc in psutil.process_iter(attrs=attrs, ad_value=None):
             info = proc.info
@@ -358,19 +382,19 @@ class SystemCollector:
             self._core_temps = self._cpu_core_temps()
             self._disk_temp_c = self._disk_temp()
         self._hist_cpu.append(total)
-        self._hist_cpu = self._hist_cpu[-self.HISTORY:]
+        self._hist_cpu = self._hist_cpu[-self.HISTORY :]
         try:
             cpu_times = psutil.cpu_times_percent(interval=None)
             user_percent = float(cpu_times.user + getattr(cpu_times, "nice", 0.0))
         except Exception:
             user_percent = 0.0
         self._hist_cpu_user.append(user_percent)
-        self._hist_cpu_user = self._hist_cpu_user[-self.HISTORY:]
+        self._hist_cpu_user = self._hist_cpu_user[-self.HISTORY :]
         if len(self._hist_core) != len(cores):
             self._hist_core = [[] for _ in cores]
         for history, value in zip(self._hist_core, cores):
             history.append(value)
-            del history[:-self.HISTORY]
+            del history[: -self.HISTORY]
 
         cpu = CpuInfo(
             model_name=self.cpu_model,
@@ -396,9 +420,9 @@ class SystemCollector:
         used = max(0, int(mem.total) - int(mem.available))
         used_percent = (used / int(mem.total) * 100.0) if mem.total else 0.0
         self._hist_mem.append(used_percent)
-        self._hist_mem = self._hist_mem[-self.HISTORY:]
+        self._hist_mem = self._hist_mem[-self.HISTORY :]
         self._hist_swap.append(float(swap.percent))
-        self._hist_swap = self._hist_swap[-self.HISTORY:]
+        self._hist_swap = self._hist_swap[-self.HISTORY :]
         mem_info = MemInfo(
             total=int(mem.total),
             used=used,
@@ -428,8 +452,8 @@ class SystemCollector:
         self._last_net = (rx, tx, now)
         self._hist_rx.append(rx_rate)
         self._hist_tx.append(tx_rate)
-        self._hist_rx = self._hist_rx[-self.HISTORY:]
-        self._hist_tx = self._hist_tx[-self.HISTORY:]
+        self._hist_rx = self._hist_rx[-self.HISTORY :]
+        self._hist_tx = self._hist_tx[-self.HISTORY :]
         net_info = NetInfo(
             rx_rate=rx_rate,
             tx_rate=tx_rate,
@@ -454,8 +478,8 @@ class SystemCollector:
         self._last_disk = (read, write, now)
         self._hist_read.append(read_rate)
         self._hist_write.append(write_rate)
-        self._hist_read = self._hist_read[-self.HISTORY:]
-        self._hist_write = self._hist_write[-self.HISTORY:]
+        self._hist_read = self._hist_read[-self.HISTORY :]
+        self._hist_write = self._hist_write[-self.HISTORY :]
         disk_info = DiskInfo(
             read_rate=read_rate,
             write_rate=write_rate,
@@ -514,8 +538,12 @@ class SystemCollector:
         if root.is_file():
             return str(root)
         index_files = (
-            "index.html", "public/index.html", "dist/index.html", "build/index.html",
-            "site/index.html", "www/index.html",
+            "index.html",
+            "public/index.html",
+            "dist/index.html",
+            "build/index.html",
+            "site/index.html",
+            "www/index.html",
         )
         for relative in index_files:
             candidate = root / relative
@@ -529,8 +557,14 @@ class SystemCollector:
                 if module.is_file():
                     return str(module)
         for relative in (
-            "app.py", "main.py", "server.py", "src/main.py", "src/app.py",
-            "server.js", "index.js", "src/index.js",
+            "app.py",
+            "main.py",
+            "server.py",
+            "src/main.py",
+            "src/app.py",
+            "server.js",
+            "index.js",
+            "src/index.js",
         ):
             candidate = root / relative
             if candidate.is_file():
@@ -552,7 +586,8 @@ class SystemCollector:
             if status in (405, 501):
                 response.close()
                 connection.request(
-                    "GET", "/",
+                    "GET",
+                    "/",
                     headers={"Host": "localhost", "Connection": "close", "Range": "bytes=0-0"},
                 )
                 response = connection.getresponse()
@@ -592,14 +627,16 @@ class SystemCollector:
             self._last_net_if[name] = (rx, tx, now)
             stats = link_stats.get(name)
             speed = float(stats.speed) * 1_000_000 / 8 if stats and stats.speed > 0 else None
-            interfaces.append(NetInterfaceInfo(
-                name=name,
-                rx_rate=rx_rate,
-                tx_rate=tx_rate,
-                total_rx=rx,
-                total_tx=tx,
-                max_rate=speed,
-            ))
+            interfaces.append(
+                NetInterfaceInfo(
+                    name=name,
+                    rx_rate=rx_rate,
+                    tx_rate=tx_rate,
+                    total_rx=rx,
+                    total_tx=tx,
+                    max_rate=speed,
+                )
+            )
 
         by_name = {item.name: item for item in interfaces}
         process_connections: dict[str, dict[int, int]] = {}
@@ -612,8 +649,22 @@ class SystemCollector:
         website_candidates: dict[tuple[int, int, str], tuple[ProcInfo, str, str]] = {}
         common_web_ports = {80, 443, 3000, 3001, 4000, 5000, 5173, 5174, 8000, 8001, 8080, 8081, 8443, 8888}
         web_process_names = (
-            "nginx", "apache", "httpd", "caddy", "traefik", "uvicorn", "gunicorn", "hypercorn",
-            "flask", "django", "vite", "next", "webpack", "http.server", "php -s", "tomcat",
+            "nginx",
+            "apache",
+            "httpd",
+            "caddy",
+            "traefik",
+            "uvicorn",
+            "gunicorn",
+            "hypercorn",
+            "flask",
+            "django",
+            "vite",
+            "next",
+            "webpack",
+            "http.server",
+            "php -s",
+            "tomcat",
         )
         generic_web_runtime_pattern = re.compile(
             r"(?:node(?:js)?|python(?:3(?:\.\d+)?)?|ruby(?:\d+(?:\.\d+)?)?|"
@@ -658,7 +709,9 @@ class SystemCollector:
                     or generic_web_runtime_pattern.fullmatch(runtime_name) is not None
                 )
                 if is_web and pid is not None:
-                    secure = local_port in (443, 8443) or any(name in app_signature for name in ("https", "ssl", "tls"))
+                    secure = local_port in (443, 8443) or any(
+                        name in app_signature for name in ("https", "ssl", "tls")
+                    )
                     scheme = "https" if secure else "http"
                     try:
                         address_ip = ipaddress.ip_address(local) if local else None
@@ -669,7 +722,11 @@ class SystemCollector:
                     else:
                         host = str(address_ip)
                     shown_host = f"[{host}]" if ":" in host else host
-                    website_candidates[(pid, local_port, scheme)] = (process, host, f"{scheme}://{shown_host}:{local_port}/")
+                    website_candidates[(pid, local_port, scheme)] = (
+                        process,
+                        host,
+                        f"{scheme}://{shown_host}:{local_port}/",
+                    )
                 continue
 
             if pid is None:
@@ -687,9 +744,8 @@ class SystemCollector:
             else:
                 continue
             try:
-                if not local or ipaddress.ip_address(local).is_unspecified:
-                    if remote:
-                        local = self._route_source_ip(remote)
+                if (not local or ipaddress.ip_address(local).is_unspecified) and remote:
+                    local = self._route_source_ip(remote)
             except ValueError:
                 continue
             interface = address_map.get(local)
@@ -711,7 +767,8 @@ class SystemCollector:
             ]
 
         listeners = sorted(
-            listeners_by_key.values(), key=lambda item: (item.port, item.protocol, item.pid or 0, item.address)
+            listeners_by_key.values(),
+            key=lambda item: (item.port, item.protocol, item.pid or 0, item.address),
         )
         if now >= self._website_probe_at:
             self._website_probe_at = now + 5.0

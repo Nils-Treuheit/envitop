@@ -50,6 +50,7 @@ from .widgets import (
     SessionDetail,
     TokenOverview,
 )
+import contextlib
 
 HELP_TEXT = """\
 [b]envitop[/b] — btop + nvitop + abtop in one view
@@ -119,10 +120,8 @@ class HelpScreen(ModalScreen):
         action = self.SCROLL_KEYS.get(event.key)
         if action:
             box = self.query_one("#help-box", VerticalScroll)
-            try:
+            with contextlib.suppress(Exception):
                 getattr(box, f"action_{action}")()
-            except Exception:
-                pass
             return
         self.dismiss()
 
@@ -165,7 +164,7 @@ class EnviTop(App):
     #cpu-content { height: 1fr; }
     #cpu-top-row { height: 1fr; min-height: 4; }
     #cpu-core-scroll { height: 1fr; min-height: 4; overflow-y: auto; }
-    #cpu-right { height: 1fr; min-width: 18; }
+    #panel-cpu-aggregate { height: 1fr; min-width: 18; }
     #cpu-top-procs { height: 1fr; min-height: 3; }
     #panel-mem { height: 1.4fr; }
     #memory-content { height: 3.05fr; }
@@ -258,7 +257,7 @@ class EnviTop(App):
                         with Horizontal(id="cpu-top-row"):
                             with VerticalScroll(id="cpu-core-scroll"):
                                 yield CoreBars(id="cpu-cores")
-                            with Vertical(id="cpu-right"):
+                            with Vertical(id="panel-cpu-aggregate", classes="cpu-aggregate"):
                                 yield HistoryGraph(
                                     maximum=100,
                                     color_mode="value",
@@ -337,6 +336,7 @@ class EnviTop(App):
         titles = {
             "panel-cpu": " CPU ",
             "panel-cpu-top-procs": " CPU PROCESSES ",
+            "panel-cpu-aggregate": " AGGREGATED CPU MONITOR ",
             "panel-mem": " MEMORY ",
             "panel-net": " NETWORK ",
             "panel-net-interfaces": " INTERFACES / PROCESS I/O ",
@@ -388,17 +388,33 @@ class EnviTop(App):
         self.narrow = width < 116
         cols = self._columns()
         panels = {
-            "system": ["panel-cpu", "panel-mem", "panel-net", "panel-net-interfaces",
-                       "panel-websites", "panel-listeners", "panel-disk", "panel-filesystems"],
+            "system": [
+                "panel-cpu",
+                "panel-mem",
+                "panel-net",
+                "panel-net-interfaces",
+                "panel-websites",
+                "panel-listeners",
+                "panel-disk",
+                "panel-filesystems",
+            ],
             "gpu": ["panel-gpu", "panel-gpu-stats", "panel-gpuprocs", "panel-procs"],
             "agents": ["panel-agents", "panel-tokens", "panel-detail", "panel-quota", "panel-ports"],
         }
         tab_panels = {
             "overview": [
-                "panel-cpu", "panel-mem", "panel-net", "panel-disk",
-                *panels["gpu"], "panel-agents", "panel-tokens", "panel-detail", "panel-quota",
+                "panel-cpu",
+                "panel-cpu-aggregate",
+                "panel-mem",
+                "panel-net",
+                "panel-disk",
+                *panels["gpu"],
+                "panel-agents",
+                "panel-tokens",
+                "panel-detail",
+                "panel-quota",
             ],
-            "cpu": ["panel-cpu", "panel-cpu-top-procs"],
+            "cpu": ["panel-cpu", "panel-cpu-aggregate", "panel-cpu-top-procs"],
             "gpu": ["panel-gpu", "panel-gpu-stats", "panel-gpuprocs"],
             "net": ["panel-net", "panel-net-interfaces", "panel-websites", "panel-listeners"],
             "memory": ["panel-mem", "panel-disk", "panel-filesystems"],
@@ -406,31 +422,48 @@ class EnviTop(App):
             "agents": panels["agents"],
         }
         visible = set(tab_panels.get(self.view, tab_panels["overview"]))
+        aggregate_panel = self.query_one("#panel-cpu-aggregate")
+        if self.view == "cpu":
+            aggregate_panel.add_class("panel")
+        else:
+            aggregate_panel.remove_class("panel")
         self.query_one("#panel-procs").border_title = (
             " CPU PROCESSES " if self.view == "overview" else " PROCESSES + GPU "
         )
         # Keep Overview legible at small widths; every subsystem remains one
         # key away in its dedicated tab.
-        if self.view == "overview":
-            if self.narrow:
-                visible = {"panel-cpu", "panel-mem", "panel-net", "panel-disk"}
-                if self.focus_area == "agents":
-                    visible.update(("panel-agents", "panel-tokens", "panel-detail", "panel-quota"))
-                elif self.focus_area == "gpuprocs":
-                    visible.update(panel_id for panel_id in panels["gpu"] if panel_id != "panel-procs")
-                elif self.focus_area == "procs":
-                    visible.add("panel-procs")
+        if self.view == "overview" and self.narrow:
+            visible = {"panel-cpu", "panel-cpu-aggregate", "panel-mem", "panel-net", "panel-disk"}
+            if self.focus_area == "agents":
+                visible.update(("panel-agents", "panel-tokens", "panel-detail", "panel-quota"))
+            elif self.focus_area == "gpuprocs":
+                visible.update(panel_id for panel_id in panels["gpu"] if panel_id != "panel-procs")
+            elif self.focus_area == "procs":
+                visible.add("panel-procs")
         for name, col in cols.items():
-            col.styles.display = "block" if any(
-                panel_id in visible for panel_id in panels[name]
-            ) else "none"
+            col.styles.display = "block" if any(panel_id in visible for panel_id in panels[name]) else "none"
             col.styles.width = "1fr"
             col.styles.height = "1fr"
         for panel_id in (
-            "panel-cpu", "panel-cpu-top-procs", "panel-mem", "panel-net", "panel-net-interfaces",
-            "panel-websites", "panel-listeners", "panel-disk", "panel-filesystems", "panel-gpu",
-            "panel-gpu-stats", "panel-gpuprocs", "panel-procs", "panel-agents", "panel-tokens",
-            "panel-detail", "panel-quota", "panel-ports",
+            "panel-cpu",
+            "panel-cpu-aggregate",
+            "panel-cpu-top-procs",
+            "panel-mem",
+            "panel-net",
+            "panel-net-interfaces",
+            "panel-websites",
+            "panel-listeners",
+            "panel-disk",
+            "panel-filesystems",
+            "panel-gpu",
+            "panel-gpu-stats",
+            "panel-gpuprocs",
+            "panel-procs",
+            "panel-agents",
+            "panel-tokens",
+            "panel-detail",
+            "panel-quota",
+            "panel-ports",
         ):
             panel = self.query_one(f"#{panel_id}")
             panel.styles.display = "block" if panel_id in visible else "none"
@@ -441,17 +474,19 @@ class EnviTop(App):
         memory_visible = bool(visible.intersection({"panel-mem", "panel-disk", "panel-filesystems"}))
         self.query_one("#memory-content").styles.display = "block" if memory_visible else "none"
         self.query_one("#memory-content").styles.layout = "vertical"
-        self.query_one("#memory-lower").styles.display = "block" if self.view in ("overview", "memory") else "none"
+        self.query_one("#memory-lower").styles.display = (
+            "block" if self.view in ("overview", "memory") else "none"
+        )
         self.query_one("#panel-filesystems").styles.display = "block" if self.view == "memory" else "none"
         self.query_one("#mem-extra").styles.display = "block" if self.view == "memory" else "none"
         self.query_one("#cpu-top-row").styles.layout = "horizontal"
         self.query_one("#cpu-top-row").styles.height = "1fr"
-        self.query_one("#cpu-right").styles.layout = "vertical"
-        self.query_one("#cpu-right").styles.display = "block"
-        self.query_one("#cpu-right").styles.height = "1fr"
-        self.query_one("#cpu-right").styles.margin_left = 0
+        self.query_one("#panel-cpu-aggregate").styles.layout = "vertical"
+        self.query_one("#panel-cpu-aggregate").styles.display = "block"
+        self.query_one("#panel-cpu-aggregate").styles.height = "1fr"
+        self.query_one("#panel-cpu-aggregate").styles.margin_left = 0
         self.query_one("#cpu-core-scroll").styles.width = "1fr"
-        self.query_one("#cpu-right").styles.width = "1fr"
+        self.query_one("#panel-cpu-aggregate").styles.width = "1fr"
         self.query_one("#cpu-graph").styles.display = "block"
         self.query_one("#cpu-graph").styles.height = "1.5fr"
         self.query_one("#cpu-top-procs").styles.display = "block" if self.view == "cpu" else "none"
@@ -462,13 +497,21 @@ class EnviTop(App):
         self.query_one("#net-details").styles.height = "1fr"
         self.query_one("#proc-summary").styles.display = "block" if self.view == "procs" else "none"
         if self.view == "overview":
-            for panel_id, height in (("panel-cpu", "2.6fr"), ("memory-content", "3.05fr"),
-                                     ("panel-mem", "1.4fr"), ("memory-lower", "1.65fr"), ("panel-disk", "1fr"),
-                                     ("panel-net", "1.15fr"),
-                                     ("panel-gpu", "2.5fr"), ("panel-gpuprocs", "1.3fr"),
-                                     ("panel-procs", "1.45fr"), ("panel-agents", "1.85fr"),
-                                     ("panel-tokens", "2fr"), ("panel-detail", "1.3fr"),
-                                     ("panel-quota", "1fr")):
+            for panel_id, height in (
+                ("panel-cpu", "2.6fr"),
+                ("memory-content", "3.05fr"),
+                ("panel-mem", "1.4fr"),
+                ("memory-lower", "1.65fr"),
+                ("panel-disk", "1fr"),
+                ("panel-net", "1.15fr"),
+                ("panel-gpu", "2.5fr"),
+                ("panel-gpuprocs", "1.3fr"),
+                ("panel-procs", "1.45fr"),
+                ("panel-agents", "1.85fr"),
+                ("panel-tokens", "2fr"),
+                ("panel-detail", "1.3fr"),
+                ("panel-quota", "1fr"),
+            ):
                 self.query_one(f"#{panel_id}").styles.height = height
         # Focused pages rearrange their subsystem panels around the available
         # width instead of stretching the Overview's vertical card stacks.
@@ -478,7 +521,7 @@ class EnviTop(App):
         self.query_one("#cpu-top-row").styles.layout = "vertical"
         self.query_one("#cpu-cores").styles.width = "1fr"
         self.query_one("#cpu-graph").styles.width = "1fr"
-        self.query_one("#cpu-right").styles.width = "1fr"
+        self.query_one("#panel-cpu-aggregate").styles.width = "1fr"
         self.query_one("#cpu-cores").styles.height = "1fr"
         self.query_one("#memory-lower").styles.layout = "vertical"
         self.query_one("#panel-mem").styles.height = "1.4fr"
@@ -487,8 +530,11 @@ class EnviTop(App):
         self.query_one("#panel-filesystems").styles.width = "1fr"
         self.query_one("#agent-content").styles.layout = "vertical"
         self.query_one("#agent-content").styles.display = (
-            "block" if any(panel_id in visible for panel_id in
-                           ("panel-agents", "panel-tokens", "panel-detail", "panel-quota", "panel-ports"))
+            "block"
+            if any(
+                panel_id in visible
+                for panel_id in ("panel-agents", "panel-tokens", "panel-detail", "panel-quota", "panel-ports")
+            )
             else "none"
         )
         self.query_one("#agents-row-top").styles.layout = "vertical"
@@ -500,7 +546,7 @@ class EnviTop(App):
         if self.view == "overview" and width >= 116:
             self.query_one("#cpu-top-row").styles.layout = "horizontal"
             self.query_one("#cpu-core-scroll").styles.width = "1.1fr"
-            self.query_one("#cpu-right").styles.width = "1fr"
+            self.query_one("#panel-cpu-aggregate").styles.width = "1fr"
         if self.view == "cpu":
             self.query_one("#cpu-content").styles.layout = "vertical"
             self.query_one("#cpu-top-row").styles.layout = "horizontal"
@@ -513,9 +559,9 @@ class EnviTop(App):
             self.query_one("#cpu-core-scroll").styles.height = "1fr"
             self.query_one("#cpu-core-scroll").styles.width = "1fr"
             self.query_one("#cpu-cores").styles.width = "1fr"
-            self.query_one("#cpu-right").styles.height = min(14, core_count + 1)
-            self.query_one("#cpu-right").styles.width = "0.32fr"
-            self.query_one("#cpu-right").styles.margin_left = 2
+            self.query_one("#panel-cpu-aggregate").styles.height = "1fr"
+            self.query_one("#panel-cpu-aggregate").styles.width = "0.43fr"
+            self.query_one("#panel-cpu-aggregate").styles.margin_left = 1
             self.query_one("#cpu-graph").styles.height = "1fr"
             self.query_one("#panel-cpu-top-procs").styles.height = "1fr"
             self.query_one("#cpu-top-procs").styles.height = "1fr"
@@ -564,10 +610,8 @@ class EnviTop(App):
         palette = get_palette()
         for panel in self.query(".panel"):
             panel.remove_class("active")
-            try:
+            with contextlib.suppress(Exception):
                 panel.styles.border = ("round", palette.border)
-            except Exception:
-                pass
         ids: list[str] = []
         ids = {
             "overview": {
@@ -593,28 +637,26 @@ class EnviTop(App):
     def _apply_theme(self) -> None:
         """Push the active palette into the pieces defined by static CSS."""
         palette = get_palette()
-        try:
+        with contextlib.suppress(Exception):
             self.screen.styles.background = palette.bg
-        except Exception:
-            pass
         for selector in ("#header", "#footer"):
-            try:
+            with contextlib.suppress(Exception):
                 self.query_one(selector).styles.background = palette.bg
-            except Exception:
-                pass
         for panel in self.query(".panel"):
-            try:
+            with contextlib.suppress(Exception):
                 panel.styles.background = palette.panel
-            except Exception:
-                pass
         self._update_active_panel()
 
     def _set_view(self, view: str) -> None:
         self.view = view
         self.narrow = self.size.width < 116
-        self.focus_area = {"overview": "agents",
-                           "cpu": "none",
-                           "gpu": "gpuprocs", "procs": "procs", "agents": "agents"}.get(view, "none")
+        self.focus_area = {
+            "overview": "agents",
+            "cpu": "none",
+            "gpu": "gpuprocs",
+            "procs": "procs",
+            "agents": "agents",
+        }.get(view, "none")
         self._apply_layout(self.size.width)
 
     def _cycle_focus(self, backwards: bool = False) -> None:
@@ -792,7 +834,8 @@ class EnviTop(App):
             view=self.view,
             insight_summary=(
                 f"⚠ {len(self.current_insights)} · {clip(self.current_insights[0].title, 20)}"
-                if self.current_insights else ""
+                if self.current_insights
+                else ""
             ),
         )
 
@@ -862,8 +905,17 @@ class EnviTop(App):
             event.stop()
             return
         if key in ("0", "1", "2", "3", "4", "5", "6"):
-            self._set_view({"0": "overview", "1": "cpu", "2": "gpu", "3": "net",
-                            "4": "memory", "5": "procs", "6": "agents"}[key])
+            self._set_view(
+                {
+                    "0": "overview",
+                    "1": "cpu",
+                    "2": "gpu",
+                    "3": "net",
+                    "4": "memory",
+                    "5": "procs",
+                    "6": "agents",
+                }[key]
+            )
             event.stop()
             return
         if key in ("left", "right", "home", "end") and self.timeline:
@@ -959,10 +1011,8 @@ class EnviTop(App):
             self.agent_index = 0
 
         # Header / footer.
-        try:
+        with contextlib.suppress(Exception):
             self.query_one("#header", Header).update_data(live_snapshot, self.view)
-        except Exception:
-            pass
         self.current_insights = diagnose(live_snapshot, list(self.timeline))
         self._update_footer()
 
@@ -979,8 +1029,9 @@ class EnviTop(App):
             style=palette.dim,
         )
         stats_width = cpu_widget.size.width or 72
-        cpu_name = Text(clip(cpu.model_name, max(1, stats_width - cpu_right.cell_len - 1)),
-                        style=f"bold {palette.text}")
+        cpu_name = Text(
+            clip(cpu.model_name, max(1, stats_width - cpu_right.cell_len - 1)), style=f"bold {palette.text}"
+        )
         cpu_stats = Text()
         cpu_stats.append_text(cpu_name)
         cpu_stats.append(" " * max(1, stats_width - cpu_name.cell_len - cpu_right.cell_len))
@@ -990,8 +1041,11 @@ class EnviTop(App):
             cpu.user_history, maximum=100, secondary=cpu.history
         )
         self.query_one("#cpu-cores", CoreBars).update_data(
-            cpu.per_core, cpu.core_temps, cpu.core_temp_source,
-            cpu.core_history, detailed=self.view == "cpu",
+            cpu.per_core,
+            cpu.core_temps,
+            cpu.core_temp_source,
+            cpu.core_history,
+            detailed=self.view == "cpu",
         )
         self.query_one("#cpu-top-procs", CpuTopProcesses).update_data(snap.procs)
         self.query_one("#panel-cpu").border_subtitle = f" {cpu.percent:.0f}% "
@@ -1016,7 +1070,10 @@ class EnviTop(App):
         mem_extra.append(f"   CACHE {human_bytes(mem.cached)}", style=palette.blue)
         mem_extra.append(f"   BUFFERS {human_bytes(mem.buffers)}", style=palette.dim)
         swap_percent = f"{mem.swap_percent:.1f}%" if mem.swap_total else "off"
-        mem_extra.append(f"   SWAP {human_bytes(mem.swap_used)}/{human_bytes(mem.swap_total)} {swap_percent}", style=palette.magenta)
+        mem_extra.append(
+            f"   SWAP {human_bytes(mem.swap_used)}/{human_bytes(mem.swap_total)} {swap_percent}",
+            style=palette.magenta,
+        )
         self.query_one("#mem-extra", OneLine).update_text(mem_extra)
         self.query_one("#mem-graph", HistoryGraph).update_data(
             mem.history, maximum=100, secondary=mem.swap_history
@@ -1030,7 +1087,9 @@ class EnviTop(App):
         net_stats.append(human_rate(net.rx_rate), style=palette.text)
         net_stats.append("  ▲ ", style=palette.cyan)
         net_stats.append(human_rate(net.tx_rate), style=palette.text)
-        net_stats.append(f"  total {human_bytes(net.total_rx)} / {human_bytes(net.total_tx)}", style=palette.faint)
+        net_stats.append(
+            f"  total {human_bytes(net.total_rx)} / {human_bytes(net.total_tx)}", style=palette.faint
+        )
         self.query_one("#net-stats", OneLine).update_text(net_stats)
         recent_rx = smooth_series(net.rx_history[-60:] or [1])
         recent_tx = smooth_series(net.tx_history[-60:] or [1])
@@ -1065,9 +1124,9 @@ class EnviTop(App):
             else:
                 hottest = snap.gpu.hottest_temp_c
                 temp_text = f" max {hottest:.0f}°C" if hottest is not None else ""
-                self.query_one("#panel-gpu").border_subtitle = (
-                    f" avg {snap.gpu.aggregate_util:.0f}% · VRAM {snap.gpu.aggregate_mem_percent:.0f}%{temp_text} "
-                )
+                self.query_one(
+                    "#panel-gpu"
+                ).border_subtitle = f" avg {snap.gpu.aggregate_util:.0f}% · VRAM {snap.gpu.aggregate_mem_percent:.0f}%{temp_text} "
         else:
             self.query_one("#panel-gpu").border_subtitle = " n/a "
 
@@ -1088,9 +1147,7 @@ class EnviTop(App):
                     mem_pct=gpu_proc.host_mem_pct or 0.0,
                     rss=gpu_proc.rss,
                     cmd=gpu_proc.cmd or gpu_proc.name,
-                    create_time=(time.time() - gpu_proc.runtime_s)
-                    if gpu_proc.runtime_s is not None
-                    else 0.0,
+                    create_time=(time.time() - gpu_proc.runtime_s) if gpu_proc.runtime_s is not None else 0.0,
                 )
             )
             proc_pids.add(gpu_proc.pid)
@@ -1151,21 +1208,33 @@ class EnviTop(App):
 
         if self.proc_filter and self.proc_filter_mode == "global":
             query = self.proc_filter.casefold()
-            procs = [
-                proc for proc in procs
-                if query in " ".join(column_values(proc).values()).casefold()
-            ]
+            procs = [proc for proc in procs if query in " ".join(column_values(proc).values()).casefold()]
         elif self.proc_filter and self.proc_filter_mode == "column":
             if "/" not in self.proc_filter:
                 procs = []
             else:
                 column_name, pattern = self.proc_filter.split("/", 1)
                 aliases = {
-                    "pid": "pid", "user": "user", "cpu": "cpu", "cpu%": "cpu",
-                    "mem": "mem", "mem%": "mem", "rss": "rss", "gpu": "gpu",
-                    "t": "type", "type": "type", "sm": "sm", "sm%": "sm",
-                    "gmbw": "gmbw", "gmbw%": "gmbw", "vram": "vram", "time": "time",
-                    "process": "process", "name": "process", "cmd": "process", "command": "process",
+                    "pid": "pid",
+                    "user": "user",
+                    "cpu": "cpu",
+                    "cpu%": "cpu",
+                    "mem": "mem",
+                    "mem%": "mem",
+                    "rss": "rss",
+                    "gpu": "gpu",
+                    "t": "type",
+                    "type": "type",
+                    "sm": "sm",
+                    "sm%": "sm",
+                    "gmbw": "gmbw",
+                    "gmbw%": "gmbw",
+                    "vram": "vram",
+                    "time": "time",
+                    "process": "process",
+                    "name": "process",
+                    "cmd": "process",
+                    "command": "process",
                 }
                 column = aliases.get(column_name.strip().casefold())
                 try:
@@ -1194,7 +1263,9 @@ class EnviTop(App):
             proc_match = min(self.proc_index, len(procs) - 1)
             preferred_pid = procs[proc_match].pid
             gpu_match = index_for_pid(gpu_processes, preferred_pid)
-        self.proc_index = proc_match if proc_match >= 0 else min(max(self.proc_index, 0), max(0, len(procs) - 1))
+        self.proc_index = (
+            proc_match if proc_match >= 0 else min(max(self.proc_index, 0), max(0, len(procs) - 1))
+        )
         self.gpu_proc_index = gpu_match
         self._displayed_gpu_processes = gpu_processes
         self._displayed_procs = procs
@@ -1229,16 +1300,21 @@ class EnviTop(App):
         proc_summary.append("CPU% is whole-host capacity", style=palette.faint)
         if self.proc_filter_active:
             prefix = "f:" if self.proc_filter_mode == "global" else "/"
-            proc_summary.append(f"   {prefix}{self.proc_filter}▏ Enter apply · Esc clear", style=palette.yellow)
+            proc_summary.append(
+                f"   {prefix}{self.proc_filter}▏ Enter apply · Esc clear", style=palette.yellow
+            )
         elif self.proc_filter:
             prefix = "f " if self.proc_filter_mode == "global" else "/"
-            proc_summary.append(f"   {prefix}{self.proc_filter} · f search / regex edit · Esc clear", style=palette.cyan)
+            proc_summary.append(
+                f"   {prefix}{self.proc_filter} · f search / regex edit · Esc clear", style=palette.cyan
+            )
         else:
             proc_summary.append("   f search · / COLUMN/REGEX · click headers to sort", style=palette.faint)
         self.query_one("#proc-summary", OneLine).update_text(proc_summary)
         sort_subtitle = (
             f" {self.proc_sort_column.upper()} {'ASC' if self.proc_sort_direction > 0 else 'DESC'} "
-            if self.proc_sort_column else " UNSORTED "
+            if self.proc_sort_column
+            else " UNSORTED "
         )
         self.query_one("#panel-procs").border_subtitle = sort_subtitle
 
@@ -1246,9 +1322,9 @@ class EnviTop(App):
         self.query_one("#agents", AgentTable).update_data(
             snap.agents, self.agent_index, snap.token_rate, snap.agent_scope
         )
-        self.query_one("#panel-agents").border_subtitle = (
-            f" {sum(1 for s in snap.agents if s.is_active)}/{len(snap.agents)} "
-        )
+        self.query_one(
+            "#panel-agents"
+        ).border_subtitle = f" {sum(1 for s in snap.agents if s.is_active)}/{len(snap.agents)} "
         selected = self._selected_session(snap)
         self.query_one("#tokens", TokenOverview).update_data(selected, snap.token_rate)
         token_title = " TOKENS "

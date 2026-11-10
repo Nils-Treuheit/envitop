@@ -302,27 +302,31 @@ class HistoryGraph(Widget):
             lines: list[Text] = []
             if show_labels and self.primary_label:
                 lines.append(Text(self.primary_label, style=primary_colour))
-            lines.extend(graph_fn(
-                self.values,
-                w,
-                top_h,
-                palette,
-                maximum=maximum,
-                color_by=self.color_mode,
-                solid_color=primary_colour if self.color_mode != "value" else None,
-            ))
+            lines.extend(
+                graph_fn(
+                    self.values,
+                    w,
+                    top_h,
+                    palette,
+                    maximum=maximum,
+                    color_by=self.color_mode,
+                    solid_color=primary_colour if self.color_mode != "value" else None,
+                )
+            )
             if show_divider:
                 lines.append(Text("─" * w, style=palette.faint))
-            lines.extend(graph_fn(
-                self.secondary,
-                w,
-                bottom_h,
-                palette,
-                maximum=self.secondary_maximum or maximum,
-                color_by=self.color_mode,
-                solid_color=secondary_colour if self.color_mode != "value" else None,
-                invert=self.secondary_invert,
-            ))
+            lines.extend(
+                graph_fn(
+                    self.secondary,
+                    w,
+                    bottom_h,
+                    palette,
+                    maximum=self.secondary_maximum or maximum,
+                    color_by=self.color_mode,
+                    solid_color=secondary_colour if self.color_mode != "value" else None,
+                    invert=self.secondary_invert,
+                )
+            )
             if show_labels and self.secondary_label:
                 lines.append(Text(self.secondary_label, style=secondary_colour))
             return _join(lines, w, h)
@@ -374,11 +378,12 @@ class CoreBars(Widget):
             return Text("waiting for samples…", style=palette.dim)
         if self.detailed:
             core_width, temp_width, value_width = 6, 8, 7
-            bar_width = max(1, w - core_width - temp_width - value_width - 6)
+            bar_width = max(1, w - core_width - temp_width - value_width - 8)
             header = Text()
             header.append(f"{'CORE':<{core_width}}  {'TEMP':>{temp_width}}  ", style=f"bold {palette.dim}")
             header.append("UTILIZATION".ljust(bar_width), style=f"bold {palette.dim}")
             header.append(f"  {'CPU%':>{value_width}}", style=f"bold {palette.dim}")
+            header.append("  ")
             lines = [_pad_text(header, w)]
             for idx, pct in enumerate(cores):
                 temp = self.temperatures[idx] if idx < len(self.temperatures) else None
@@ -386,11 +391,15 @@ class CoreBars(Widget):
                 line = Text()
                 line.append(f"C{idx:02d}".ljust(core_width), style=f"bold {palette.text}")
                 line.append("  ")
-                line.append(f"{temp_text:>{temp_width}}", style=f"bold {palette.orange if temp is not None else palette.dim}")
+                line.append(
+                    f"{temp_text:>{temp_width}}",
+                    style=f"bold {palette.orange if temp is not None else palette.dim}",
+                )
                 line.append("  ")
                 line.append_text(_context_bar(pct, bar_width, palette))
                 line.append("  ")
                 line.append(f"{pct:6.1f}%", style=f"bold {palette.gradient(pct)}")
+                line.append("  ")
                 lines.append(_pad_text(line, w))
             return _join(lines, w, h)
         cell = 14
@@ -437,13 +446,13 @@ class CpuTopProcesses(Widget):
         self.sort_column: Optional[str] = "cpu"
         self.sort_direction = -1
         self._default_sort = True
-        self.scroll_offset = 0
+        self.row_offset = 0
 
     def update_data(self, processes: Sequence[ProcInfo]) -> None:
         self._source_processes = list(processes)
         self._sort_processes()
-        self.scroll_offset = min(
-            self.scroll_offset,
+        self.row_offset = min(
+            self.row_offset,
             max(0, len(self.processes) - max(1, self.size.height - 1)),
         )
         self.refresh()
@@ -451,9 +460,9 @@ class CpuTopProcesses(Widget):
     def scroll_by(self, amount: int) -> None:
         visible = max(1, self.size.height - 1)
         maximum = max(0, len(self.processes) - visible)
-        next_offset = min(max(0, self.scroll_offset + amount), maximum)
-        if next_offset != self.scroll_offset:
-            self.scroll_offset = next_offset
+        next_offset = min(max(0, self.row_offset + amount), maximum)
+        if next_offset != self.row_offset:
+            self.row_offset = next_offset
             self.refresh()
 
     def _sort_processes(self) -> None:
@@ -504,7 +513,7 @@ class CpuTopProcesses(Widget):
                 else:
                     self.sort_column = None
                     self.sort_direction = 0
-                self.scroll_offset = 0
+                self.row_offset = 0
                 self._sort_processes()
                 self.refresh()
                 event.stop()
@@ -535,16 +544,18 @@ class CpuTopProcesses(Widget):
                 arrow = "↓" if self.sort_direction < 0 else "↑"
                 label = f"{label} {arrow}"
             value = clip(label, column_width)
-            header.append(f"{value:<{column_width}}" if align == "left" else f"{value:>{column_width}}",
-                          style=f"bold {palette.accent if selected else palette.dim}")
+            header.append(
+                f"{value:<{column_width}}" if align == "left" else f"{value:>{column_width}}",
+                style=f"bold {palette.accent if selected else palette.dim}",
+            )
         lines = [_pad_text(header, w)]
         visible = max(0, h - 1)
-        start = min(self.scroll_offset, max(0, len(self.processes) - visible))
-        for proc in self.processes[start:start + visible]:
+        start = min(self.row_offset, max(0, len(self.processes) - visible))
+        for proc in self.processes[start : start + visible]:
             fields = [
                 (str(proc.pid), pid_width, "left", palette.faint),
-                (f"{proc.cpu:.1f}", cpu_width, "right", f"bold {palette.gradient(proc.cpu)}"),
-                (f"{proc.mem_pct:.1f}", ram_width, "right", palette.dim),
+                (f"{proc.cpu:.1f}", cpu_width, "right", f"bold {_process_usage_color(proc.cpu, palette)}"),
+                (f"{proc.mem_pct:.1f}", ram_width, "right", _process_usage_color(proc.mem_pct, palette)),
                 (proc.name, process_width, "left", palette.text),
                 (proc.cmd or proc.name, command_width, "left", palette.dim),
             ]
@@ -553,8 +564,9 @@ class CpuTopProcesses(Widget):
                 if index:
                     line.append(" " * gap)
                 value = clip(value, column_width)
-                line.append(f"{value:<{column_width}}" if align == "left" else f"{value:>{column_width}}",
-                            style=style)
+                line.append(
+                    f"{value:<{column_width}}" if align == "left" else f"{value:>{column_width}}", style=style
+                )
             lines.append(_pad_text(line, w))
         if not self.processes:
             lines.append(_pad_text(Text("No process samples available.", style=palette.dim), w))
@@ -600,15 +612,27 @@ class GpuPanel(Widget):
             chart_height = max(1, (h - 3) // 2)
             remainder = max(1, h - chart_height - 3)
             lines = [Text("GPU UTILIZATION", style=palette.dim)]
-            lines.extend(braille_graph(
-                smooth_series(gpu.history or [gpu.util]), w, chart_height,
-                palette, maximum=100, color_by="value",
-            ))
+            lines.extend(
+                braille_graph(
+                    smooth_series(gpu.history or [gpu.util]),
+                    w,
+                    chart_height,
+                    palette,
+                    maximum=100,
+                    color_by="value",
+                )
+            )
             lines.append(Text("VRAM USAGE", style=palette.dim))
-            lines.extend(braille_graph(
-                smooth_series(gpu.mem_history or [gpu.mem_percent]), w, remainder,
-                palette, maximum=100, color_by="value",
-            ))
+            lines.extend(
+                braille_graph(
+                    smooth_series(gpu.mem_history or [gpu.mem_percent]),
+                    w,
+                    remainder,
+                    palette,
+                    maximum=100,
+                    color_by="value",
+                )
+            )
             return _join(lines, w, h)
 
         n = len(state.gpus)
@@ -712,15 +736,24 @@ class GpuPanel(Widget):
         """Pool multi-GPU capacity while retaining per-device color identity."""
         gpus = sorted(state.gpus, key=lambda gpu: gpu.index)
         count = len(gpus)
-        colors = (palette.green, palette.cyan, palette.yellow, palette.magenta,
-                  palette.blue, palette.orange, palette.red)
+        colors = (
+            palette.green,
+            palette.cyan,
+            palette.yellow,
+            palette.magenta,
+            palette.blue,
+            palette.orange,
+            palette.red,
+        )
         mem_total = state.aggregate_mem_total
         power = state.aggregate_power_w
         power_limit = state.aggregate_power_limit_w
         hottest = state.hottest_temp_c
         summary = Text()
         summary.append(f"GPU CLUSTER · {count} devices", style=f"bold {palette.accent}")
-        summary.append(f"   avg util {state.aggregate_util:.0f}%", style=f"bold {palette.gradient(state.aggregate_util)}")
+        summary.append(
+            f"   avg util {state.aggregate_util:.0f}%", style=f"bold {palette.gradient(state.aggregate_util)}"
+        )
         if power is not None:
             limit = f"/{power_limit:.0f}W" if power_limit is not None else ""
             summary.append(f"   power {power:.0f}W{limit}", style=palette.orange)
@@ -733,10 +766,14 @@ class GpuPanel(Widget):
         )
         if hottest is not None:
             capacity.append(f"   max temp {hottest:.0f}°C", style=palette.orange)
-        versions = "   ".join(part for part in (
-            f"Driver {state.driver}" if state.driver else "",
-            f"CUDA {state.cuda}" if state.cuda else "",
-        ) if part)
+        versions = "   ".join(
+            part
+            for part in (
+                f"Driver {state.driver}" if state.driver else "",
+                f"CUDA {state.cuda}" if state.cuda else "",
+            )
+            if part
+        )
         if versions and capacity.cell_len + len(versions) + 3 < width:
             capacity.append(f"   {versions}", style=palette.dim)
         capacity = _pad_text(capacity, width)
@@ -755,22 +792,36 @@ class GpuPanel(Widget):
         chart_height = max(1, (height - 4 - device_rows - int(hidden > 0)) // 2)
         lines: list[Text] = [summary, capacity]
         lines.append(Text("GPU UTIL · per-device contributions to cluster average", style=palette.dim))
-        lines.extend(braille_stacked_graph(
-            utilization_layers, width, chart_height, palette,
-            colors=colors, maximum=100,
-        ))
+        lines.extend(
+            braille_stacked_graph(
+                utilization_layers,
+                width,
+                chart_height,
+                palette,
+                colors=colors,
+                maximum=100,
+            )
+        )
         lines.append(Text("VRAM · used memory pooled against total device capacity", style=palette.dim))
-        lines.extend(braille_stacked_graph(
-            memory_layers, width, chart_height, palette,
-            colors=colors, maximum=100,
-        ))
+        lines.extend(
+            braille_stacked_graph(
+                memory_layers,
+                width,
+                chart_height,
+                palette,
+                colors=colors,
+                maximum=100,
+            )
+        )
         for gpu, color in zip(gpus[:device_rows], (colors[i % len(colors)] for i in range(count))):
             name = clip(gpu.name.replace("NVIDIA ", ""), max(8, min(22, width // 4)))
             details = Text()
             details.append(f"GPU{gpu.index} ", style=f"bold {color}")
             details.append(name, style=palette.text)
             details.append(f"   {gpu.util:.0f}%", style=f"bold {palette.gradient(gpu.util)}")
-            details.append(f"   VRAM {human_bytes(gpu.mem_used)}/{human_bytes(gpu.mem_total)}", style=palette.dim)
+            details.append(
+                f"   VRAM {human_bytes(gpu.mem_used)}/{human_bytes(gpu.mem_total)}", style=palette.dim
+            )
             if gpu.temp_c is not None:
                 details.append(f"   {gpu.temp_c:.0f}°C", style=palette.orange)
             if gpu.power_w is not None:
@@ -784,7 +835,11 @@ class GpuPanel(Widget):
                 details.append(f"   {gpu.pstate}", style=palette.faint)
             lines.append(_pad_text(details, width))
         if hidden:
-            lines.append(Text(f"+ {hidden} more device(s); switch to GPU for the full device list", style=palette.faint))
+            lines.append(
+                Text(
+                    f"+ {hidden} more device(s); switch to GPU for the full device list", style=palette.faint
+                )
+            )
         return _join(lines, width, height)
 
     @staticmethod
@@ -792,26 +847,47 @@ class GpuPanel(Widget):
         gpus = sorted(state.gpus, key=lambda gpu: gpu.index)
         chart_height = max(1, (height - 3) // 2)
         remainder = max(1, height - chart_height - 3)
-        colors = (palette.green, palette.cyan, palette.yellow, palette.magenta,
-                  palette.blue, palette.orange, palette.red)
+        colors = (
+            palette.green,
+            palette.cyan,
+            palette.yellow,
+            palette.magenta,
+            palette.blue,
+            palette.orange,
+            palette.red,
+        )
         count = len(gpus)
-        util_layers = [
-            [value / count for value in (gpu.history or [gpu.util])] for gpu in gpus
-        ]
+        util_layers = [[value / count for value in (gpu.history or [gpu.util])] for gpu in gpus]
         mem_total = state.aggregate_mem_total
         mem_layers = [
-            [value * (gpu.mem_total / mem_total) if mem_total else 0.0
-             for value in (gpu.mem_history or [gpu.mem_percent])]
+            [
+                value * (gpu.mem_total / mem_total) if mem_total else 0.0
+                for value in (gpu.mem_history or [gpu.mem_percent])
+            ]
             for gpu in gpus
         ]
         lines = [Text("GPU UTILIZATION · CLUSTER MEAN", style=palette.dim)]
-        lines.extend(braille_stacked_graph(
-            util_layers, width, chart_height, palette, colors=colors, maximum=100,
-        ))
+        lines.extend(
+            braille_stacked_graph(
+                util_layers,
+                width,
+                chart_height,
+                palette,
+                colors=colors,
+                maximum=100,
+            )
+        )
         lines.append(Text("VRAM USAGE · POOLED CAPACITY", style=palette.dim))
-        lines.extend(braille_stacked_graph(
-            mem_layers, width, remainder, palette, colors=colors, maximum=100,
-        ))
+        lines.extend(
+            braille_stacked_graph(
+                mem_layers,
+                width,
+                remainder,
+                palette,
+                colors=colors,
+                maximum=100,
+            )
+        )
         return _join(lines, width, height)
 
 
@@ -837,10 +913,14 @@ class GpuStatsPanel(Widget):
         w, h = max(1, self.size.width), max(1, self.size.height)
         state = self.state
         if not state.available or not state.gpus:
-            return _join([
-                Text("GPU telemetry unavailable", style=f"bold {palette.yellow}"),
-                Text(clip(state.error, w), style=palette.dim) if state.error else Text(""),
-            ], w, h)
+            return _join(
+                [
+                    Text("GPU telemetry unavailable", style=f"bold {palette.yellow}"),
+                    Text(clip(state.error, w), style=palette.dim) if state.error else Text(""),
+                ],
+                w,
+                h,
+            )
 
         lines: list[Text] = []
         metric_label_width = len("MEM BANDWIDTH   ")
@@ -857,46 +937,92 @@ class GpuStatsPanel(Widget):
 
         if len(state.gpus) > 1:
             lines.append(Text(f"CLUSTER · {len(state.gpus)} GPUs", style=f"bold {palette.accent}"))
-            lines.append(meter_row(
-                "AVG UTIL", state.aggregate_util, f"{state.aggregate_util:.1f}%",
-                palette.gradient(state.aggregate_util),
-            ))
-            lines.append(meter_row(
-                "POOLED VRAM", state.aggregate_mem_percent,
-                f"{state.aggregate_mem_percent:.1f}%", palette.cyan,
-            ))
-            lines.append(_line([
-                ("USED ", palette.dim), (human_bytes(state.aggregate_mem_used), f"bold {palette.text}"),
-                ("   TOTAL ", palette.dim), (human_bytes(state.aggregate_mem_total), f"bold {palette.text}"),
-            ], w))
-            if state.aggregate_mem_util is not None:
-                lines.append(meter_row(
-                    "AVG MBW", state.aggregate_mem_util, f"{state.aggregate_mem_util:.1f}%",
+            lines.append(
+                meter_row(
+                    "AVG UTIL",
+                    state.aggregate_util,
+                    f"{state.aggregate_util:.1f}%",
+                    palette.gradient(state.aggregate_util),
+                )
+            )
+            lines.append(
+                meter_row(
+                    "POOLED VRAM",
+                    state.aggregate_mem_percent,
+                    f"{state.aggregate_mem_percent:.1f}%",
                     palette.cyan,
-                ))
+                )
+            )
+            lines.append(
+                _line(
+                    [
+                        ("USED ", palette.dim),
+                        (human_bytes(state.aggregate_mem_used), f"bold {palette.text}"),
+                        ("   TOTAL ", palette.dim),
+                        (human_bytes(state.aggregate_mem_total), f"bold {palette.text}"),
+                    ],
+                    w,
+                )
+            )
+            if state.aggregate_mem_util is not None:
+                lines.append(
+                    meter_row(
+                        "AVG MBW",
+                        state.aggregate_mem_util,
+                        f"{state.aggregate_mem_util:.1f}%",
+                        palette.cyan,
+                    )
+                )
             if state.aggregate_power_w is not None:
-                limit = f" / {state.aggregate_power_limit_w:.0f}W" if state.aggregate_power_limit_w is not None else ""
-                lines.append(_line([("POWER ", palette.dim), (f"{state.aggregate_power_w:.0f}W{limit}", palette.orange)], w))
+                limit = (
+                    f" / {state.aggregate_power_limit_w:.0f}W"
+                    if state.aggregate_power_limit_w is not None
+                    else ""
+                )
+                lines.append(
+                    _line(
+                        [("POWER ", palette.dim), (f"{state.aggregate_power_w:.0f}W{limit}", palette.orange)],
+                        w,
+                    )
+                )
             if state.hottest_temp_c is not None:
-                lines.append(_line([("MAX TEMP ", palette.dim), (f"{state.hottest_temp_c:.0f}°C", palette.orange)], w))
+                lines.append(
+                    _line([("MAX TEMP ", palette.dim), (f"{state.hottest_temp_c:.0f}°C", palette.orange)], w)
+                )
 
         for gpu in sorted(state.gpus, key=lambda item: item.index):
             if len(state.gpus) > 1:
                 lines.append(Text(""))
             name = clip(gpu.name.replace("NVIDIA ", ""), max(1, w - 14))
             lines.append(Text(f"GPU {gpu.index}  ·  {name}", style=f"bold {palette.accent}"))
-            lines.append(meter_row(
-                "UTILIZATION", gpu.util, f"{gpu.util:.1f}%", palette.gradient(gpu.util),
-            ))
-            lines.append(meter_row(
-                "MEM BANDWIDTH", gpu.mem_util, f"{gpu.mem_util:.1f}%" if gpu.mem_util is not None else "—",
-                palette.cyan,
-            ))
+            lines.append(
+                meter_row(
+                    "UTILIZATION",
+                    gpu.util,
+                    f"{gpu.util:.1f}%",
+                    palette.gradient(gpu.util),
+                )
+            )
+            lines.append(
+                meter_row(
+                    "MEM BANDWIDTH",
+                    gpu.mem_util,
+                    f"{gpu.mem_util:.1f}%" if gpu.mem_util is not None else "—",
+                    palette.cyan,
+                )
+            )
             lines.append(meter_row("VRAM", gpu.mem_percent, f"{gpu.mem_percent:.1f}%", palette.cyan))
-            lines.append(_line([
-                ("USED ", palette.dim), (human_bytes(gpu.mem_used), f"bold {palette.text}"),
-                ("   TOTAL ", palette.dim), (human_bytes(gpu.mem_total), f"bold {palette.text}"),
-            ], w))
+            lines.append(
+                _line(
+                    [
+                        ("USED ", palette.dim),
+                        (human_bytes(gpu.mem_used), f"bold {palette.text}"),
+                        ("   TOTAL ", palette.dim),
+                        (human_bytes(gpu.mem_total), f"bold {palette.text}"),
+                    ],
+                    w,
+                )
+            )
             environment: list[tuple[str, str]] = []
             if gpu.temp_c is not None:
                 environment.append((f"{gpu.temp_c:.0f}°C", palette.orange))
@@ -938,10 +1064,14 @@ class GpuStatsPanel(Widget):
                 lines.append(_line(parts, w))
         if state.driver or state.cuda:
             lines.append(Text(""))
-            versions = "  ".join(part for part in (
-                f"Driver {state.driver}" if state.driver else "",
-                f"CUDA {state.cuda}" if state.cuda else "",
-            ) if part)
+            versions = "  ".join(
+                part
+                for part in (
+                    f"Driver {state.driver}" if state.driver else "",
+                    f"CUDA {state.cuda}" if state.cuda else "",
+                )
+                if part
+            )
             lines.append(Text(clip(versions, w), style=palette.faint))
         return _join(lines, w, h)
 
@@ -975,7 +1105,13 @@ class DiskPanel(Widget):
             if len(values) > count:
                 length = len(values)
                 values = [
-                    max(values[int(i * length / count): max(int(i * length / count) + 1, int((i + 1) * length / count))])
+                    max(
+                        values[
+                            int(i * length / count) : max(
+                                int(i * length / count) + 1, int((i + 1) * length / count)
+                            )
+                        ]
+                    )
                     for i in range(count)
                 ]
             if len(values) < count:
@@ -1005,24 +1141,44 @@ class DiskPanel(Widget):
             write_peak = max(disk.write_history[-60:] or [disk.write_rate])
             graph_h = min(5, max(1, (h - 16) // 5))
             lines = [
-                _line([
-                    ("SYSTEM READ  ", f"bold {palette.yellow}"),
-                    (f"now {human_rate(disk.read_rate)}  peak {human_rate(read_peak)}", palette.text),
-                ], w),
+                _line(
+                    [
+                        ("SYSTEM READ  ", f"bold {palette.yellow}"),
+                        (f"now {human_rate(disk.read_rate)}  peak {human_rate(read_peak)}", palette.text),
+                    ],
+                    w,
+                ),
             ]
-            lines.extend(braille_graph(
-                disk.read_history or [disk.read_rate], w, graph_h, palette,
-                maximum=max(read_peak * 1.1, 1.0), solid_color=palette.yellow,
-            ))
+            lines.extend(
+                braille_graph(
+                    disk.read_history or [disk.read_rate],
+                    w,
+                    graph_h,
+                    palette,
+                    maximum=max(read_peak * 1.1, 1.0),
+                    solid_color=palette.yellow,
+                )
+            )
             lines.append(Text("─" * w, style=palette.faint))
-            lines.append(_line([
-                ("SYSTEM WRITE ", f"bold {palette.magenta}"),
-                (f"now {human_rate(disk.write_rate)}  peak {human_rate(write_peak)}", palette.text),
-            ], w))
-            lines.extend(braille_graph(
-                disk.write_history or [disk.write_rate], w, graph_h, palette,
-                maximum=max(write_peak * 1.1, 1.0), solid_color=palette.magenta,
-            ))
+            lines.append(
+                _line(
+                    [
+                        ("SYSTEM WRITE ", f"bold {palette.magenta}"),
+                        (f"now {human_rate(disk.write_rate)}  peak {human_rate(write_peak)}", palette.text),
+                    ],
+                    w,
+                )
+            )
+            lines.extend(
+                braille_graph(
+                    disk.write_history or [disk.write_rate],
+                    w,
+                    graph_h,
+                    palette,
+                    maximum=max(write_peak * 1.1, 1.0),
+                    solid_color=palette.magenta,
+                )
+            )
             lines.append(Text("", style=palette.faint))
             devices: dict[str, MountInfo] = {}
             for mount in disk.mounts:
@@ -1055,8 +1211,14 @@ class DiskPanel(Widget):
                     ("WRITE", write_history, mount.write_rate, write_peak, palette.magenta),
                 ):
                     row = Text()
-                    row.append(f"{device:<{device_width}} ", style=f"bold {palette.accent}" if direction == "READ" else palette.dim)
-                    row.append(f"{mount_name:<{mount_width}} ", style=palette.text if direction == "READ" else palette.dim)
+                    row.append(
+                        f"{device:<{device_width}} ",
+                        style=f"bold {palette.accent}" if direction == "READ" else palette.dim,
+                    )
+                    row.append(
+                        f"{mount_name:<{mount_width}} ",
+                        style=palette.text if direction == "READ" else palette.dim,
+                    )
                     row.append(f"{direction:<{direction_width}} ", style=f"bold {color}")
                     row.append(sparkline(history, graph_width), style=color)
                     ratio = f"{human_rate(current)} / {human_rate(peak)}"
@@ -1096,12 +1258,24 @@ class DiskPanel(Widget):
         mount_w = max(10, min(16, max((len(m.mount) for m in disk.mounts), default=9)))
         capacity_w = max(
             13,
-            min(18, max((len(f"{human_bytes(m.used)}/{human_bytes(m.total)}") for m in disk.mounts), default=10)),
+            min(
+                18,
+                max((len(f"{human_bytes(m.used)}/{human_bytes(m.total)}") for m in disk.mounts), default=10),
+            ),
         )
         free_w = max(8, min(10, max((len(human_bytes(m.free)) for m in disk.mounts), default=4)))
         if compact:
             mount_w = max(8, min(12, max((len(m.mount) for m in disk.mounts), default=8)))
-            capacity_w = max(11, min(15, max((len(f"{human_bytes(m.used)}/{human_bytes(m.total)}") for m in disk.mounts), default=11)))
+            capacity_w = max(
+                11,
+                min(
+                    15,
+                    max(
+                        (len(f"{human_bytes(m.used)}/{human_bytes(m.total)}") for m in disk.mounts),
+                        default=11,
+                    ),
+                ),
+            )
             free_w = max(6, min(9, max((len(human_bytes(m.free)) for m in disk.mounts), default=4)))
             rate_w = min(10, max(6, (w - mount_w - capacity_w - free_w - 12) // 2))
             graph_w = max(1, w - mount_w - capacity_w - free_w - 4 - rate_w * 2)
@@ -1113,13 +1287,22 @@ class DiskPanel(Widget):
             header.append(f"{'READ/s':>{rate_w}} ", style=palette.yellow)
             header.append(f"{'WRITE/s':>{rate_w}}", style=palette.magenta)
             lines.append(_pad_text(header, w))
-            scale = max(
-                (
-                    max(m.read_rate, m.write_rate, *(m.read_history[-60:] or [0.0]), *(m.write_history[-60:] or [0.0]))
-                    for m in disk.mounts
-                ),
-                default=0.0,
-            ) * 1.05 or 1.0
+            scale = (
+                max(
+                    (
+                        max(
+                            m.read_rate,
+                            m.write_rate,
+                            *(m.read_history[-60:] or [0.0]),
+                            *(m.write_history[-60:] or [0.0]),
+                        )
+                        for m in disk.mounts
+                    ),
+                    default=0.0,
+                )
+                * 1.05
+                or 1.0
+            )
             for mount in disk.mounts[: max(0, h - 2)]:
                 row = Text()
                 row.append(f"{clip(mount.mount, mount_w - 1):<{mount_w}} ", style=f"bold {palette.text}")
@@ -1199,8 +1382,12 @@ class FilesystemPanel(Widget):
             inode_percent = mount.inodes_percent
             if density == 3:
                 details = Text()
-                details.append(f"{clip(mount.mount, mount_width):<{mount_width}}", style=f"bold {palette.text}")
-                details.append(f"  {clip(mount.filesystem or '?', type_width):<{type_width}}", style=palette.dim)
+                details.append(
+                    f"{clip(mount.mount, mount_width):<{mount_width}}", style=f"bold {palette.text}"
+                )
+                details.append(
+                    f"  {clip(mount.filesystem or '?', type_width):<{type_width}}", style=palette.dim
+                )
                 details.append("  USED ", style=palette.dim)
                 details.append(human_bytes(mount.used), style=f"bold {palette.text}")
                 details.append(" / ", style=palette.faint)
@@ -1221,7 +1408,9 @@ class FilesystemPanel(Widget):
                     count_width = min(24, max(9, len(inode_counts)))
                     inode_bar_width = max(1, w - 7 - count_width - 2 - 2 - 6)
                     inode_line = Text("INODES ", style=f"bold {palette.dim}")
-                    inode_line.append(f"{clip(inode_counts, count_width):>{count_width}}", style=palette.faint)
+                    inode_line.append(
+                        f"{clip(inode_counts, count_width):>{count_width}}", style=palette.faint
+                    )
                     inode_line.append("  ")
                     inode_line.append_text(_context_bar(inode_percent, inode_bar_width, palette))
                     inode_line.append("  ")
@@ -1232,12 +1421,21 @@ class FilesystemPanel(Widget):
                     lines.append(Text("INODES unavailable", style=palette.faint))
             elif density == 2:
                 details = Text()
-                details.append(f"{clip(mount.mount, mount_width):<{mount_width}}", style=f"bold {palette.text}")
-                details.append(f"  {clip(mount.filesystem or '?', type_width):<{type_width}}", style=palette.dim)
-                details.append(f"  {human_bytes(mount.used)} / {human_bytes(mount.total)}", style=palette.text)
+                details.append(
+                    f"{clip(mount.mount, mount_width):<{mount_width}}", style=f"bold {palette.text}"
+                )
+                details.append(
+                    f"  {clip(mount.filesystem or '?', type_width):<{type_width}}", style=palette.dim
+                )
+                details.append(
+                    f"  {human_bytes(mount.used)} / {human_bytes(mount.total)}", style=palette.text
+                )
                 details.append(f"  FREE {human_bytes(mount.free)}", style=palette.green)
                 if inode_percent is not None:
-                    details.append(f"  INODE {inode_percent:.1f}%", style=palette.orange if inode_percent >= 85 else palette.dim)
+                    details.append(
+                        f"  INODE {inode_percent:.1f}%",
+                        style=palette.orange if inode_percent >= 85 else palette.dim,
+                    )
                 lines.append(_pad_text(details, w))
                 space_bar_width = max(1, w - 18)
                 space_line = Text("SPACE  ", style=f"bold {palette.dim}")
@@ -1250,9 +1448,16 @@ class FilesystemPanel(Widget):
                 line = Text()
                 line.append(f"{clip(mount.mount, mount_width):<{mount_width}}", style=palette.accent)
                 line.append(f" {clip(mount.filesystem or '?', type_width):<{type_width}} ", style=palette.dim)
-                line.append(f"{human_bytes(mount.used):>9}/{human_bytes(mount.total):<9} ", style=palette.text)
+                line.append(
+                    f"{human_bytes(mount.used):>9}/{human_bytes(mount.total):<9} ", style=palette.text
+                )
                 line.append(f"{mount.percent:5.1f}% ", style=f"bold {palette.gradient(mount.percent)}")
-                line.append(f"inode {inode}", style=palette.orange if inode_percent is not None and inode_percent >= 85 else palette.dim)
+                line.append(
+                    f"inode {inode}",
+                    style=palette.orange
+                    if inode_percent is not None and inode_percent >= 85
+                    else palette.dim,
+                )
                 lines.append(_pad_text(line, w))
 
         hidden = len(ordered) - limit
@@ -1289,28 +1494,61 @@ class TimelinePanel(Widget):
         span = max(0.0, self.snapshots[-1].ts - self.snapshots[0].ts)
         chart_h = max(2, min(8, h // 6))
         lines = [
-            _line([("LIVE" if live else "SCRUBBED", palette.green if live else palette.yellow),
-                   (f"  sample {self.selected + 1}/{len(self.snapshots)}  {when}  ", palette.text),
-                   (f"window {span:.0f}s", palette.dim)], w),
-            _line([("CPU ", palette.dim), (f"{snap.cpu.percent:.1f}%", palette.text),
-                   ("   RAM ", palette.dim), (f"{snap.mem.percent:.1f}%", palette.text),
-                   ("   load ", palette.dim), (f"{snap.cpu.load1:.2f}", palette.text)], w),
+            _line(
+                [
+                    ("LIVE" if live else "SCRUBBED", palette.green if live else palette.yellow),
+                    (f"  sample {self.selected + 1}/{len(self.snapshots)}  {when}  ", palette.text),
+                    (f"window {span:.0f}s", palette.dim),
+                ],
+                w,
+            ),
+            _line(
+                [
+                    ("CPU ", palette.dim),
+                    (f"{snap.cpu.percent:.1f}%", palette.text),
+                    ("   RAM ", palette.dim),
+                    (f"{snap.mem.percent:.1f}%", palette.text),
+                    ("   load ", palette.dim),
+                    (f"{snap.cpu.load1:.2f}", palette.text),
+                ],
+                w,
+            ),
         ]
         lines.append(Text("CPU HISTORY · whole-machine utilization", style=palette.accent))
-        lines.extend(braille_graph(
-            [item.cpu.percent for item in self.snapshots], w, chart_h, palette,
-            maximum=100, color_by="value",
-        ))
+        lines.extend(
+            braille_graph(
+                [item.cpu.percent for item in self.snapshots],
+                w,
+                chart_h,
+                palette,
+                maximum=100,
+                color_by="value",
+            )
+        )
         lines.append(Text("MEMORY HISTORY · RAM used", style=palette.magenta))
-        lines.extend(braille_graph(
-            [item.mem.percent for item in self.snapshots], w, chart_h, palette,
-            maximum=100, color_by="value",
-        ))
+        lines.extend(
+            braille_graph(
+                [item.mem.percent for item in self.snapshots],
+                w,
+                chart_h,
+                palette,
+                maximum=100,
+                color_by="value",
+            )
+        )
         if snap.gpu.gpus:
             gpu = snap.gpu.gpus[0]
-            lines.append(_line([("SELECTED GPU ", palette.dim), (f"GPU{gpu.index} {gpu.util:.0f}%", palette.text),
-                                ("   VRAM ", palette.dim),
-                                (f"{human_bytes(gpu.mem_used)}/{human_bytes(gpu.mem_total)}", palette.text)], w))
+            lines.append(
+                _line(
+                    [
+                        ("SELECTED GPU ", palette.dim),
+                        (f"GPU{gpu.index} {gpu.util:.0f}%", palette.text),
+                        ("   VRAM ", palette.dim),
+                        (f"{human_bytes(gpu.mem_used)}/{human_bytes(gpu.mem_total)}", palette.text),
+                    ],
+                    w,
+                )
+            )
         lines.append(Text("SAMPLE LOG · ← older  → newer  Home oldest  End live", style=palette.faint))
         rows = max(0, h - len(lines))
         start = max(0, self.selected - rows // 2)
@@ -1321,9 +1559,14 @@ class TimelinePanel(Widget):
             selected = index == self.selected
             ts = time.strftime("%H:%M:%S", time.localtime(item.ts)) if item.ts else "--:--:--"
             glyph = "▶" if selected else " "
-            line = _line([(glyph + " ", palette.accent if selected else palette.faint),
-                          (f"{ts}  CPU {item.cpu.percent:5.1f}%  RAM {item.mem.percent:5.1f}%  ", palette.text),
-                          (f"RX {human_rate(item.net.rx_rate)}  TX {human_rate(item.net.tx_rate)}", palette.dim)], w)
+            line = _line(
+                [
+                    (glyph + " ", palette.accent if selected else palette.faint),
+                    (f"{ts}  CPU {item.cpu.percent:5.1f}%  RAM {item.mem.percent:5.1f}%  ", palette.text),
+                    (f"RX {human_rate(item.net.rx_rate)}  TX {human_rate(item.net.tx_rate)}", palette.dim),
+                ],
+                w,
+            )
             lines.append(line)
         return _join(lines, w, h)
 
@@ -1350,16 +1593,27 @@ class NetDetailPanel(Widget):
         peak_rx = max(net.rx_history[-60:] or [net.rx_rate])
         peak_tx = max(net.tx_history[-60:] or [net.tx_rate])
         lines = [
-            _line([("OBSERVED PEAK  ", palette.dim),
-                   (f"RX {human_rate(peak_rx)}", palette.green),
-                   ("   TX ", palette.dim), (human_rate(peak_tx), palette.cyan)], w),
+            _line(
+                [
+                    ("OBSERVED PEAK  ", palette.dim),
+                    (f"RX {human_rate(peak_rx)}", palette.green),
+                    ("   TX ", palette.dim),
+                    (human_rate(peak_tx), palette.cyan),
+                ],
+                w,
+            ),
         ]
         interfaces = sorted(
             net.interfaces,
             key=lambda item: (item.rx_rate + item.tx_rate > 0, item.rx_rate + item.tx_rate),
             reverse=True,
         )
-        lines.append(Text("Interface counters · per-process rates use Linux TCP_INFO when available", style=palette.faint))
+        lines.append(
+            Text(
+                "Interface counters · per-process rates use Linux TCP_INFO when available",
+                style=palette.faint,
+            )
+        )
         hidden = 0
         interface_width = 16
         process_width = 22
@@ -1374,7 +1628,9 @@ class NetDetailPanel(Widget):
                 continue
             maximum = human_rate(interface.max_rate) if interface.max_rate is not None else "—"
             interface_line = Text()
-            interface_line.append(f"{clip(interface.name, interface_width):<{interface_width}}", style=f"bold {palette.accent}")
+            interface_line.append(
+                f"{clip(interface.name, interface_width):<{interface_width}}", style=f"bold {palette.accent}"
+            )
             interface_line.append(gap)
             interface_line.append(f"{'RX ' + human_rate(interface.rx_rate):>12}", style=palette.green)
             interface_line.append(gap)
@@ -1412,7 +1668,9 @@ class NetDetailPanel(Widget):
             else:
                 lines.append(Text("      no active process-owned connections", style=palette.faint))
         if hidden and len(lines) < h:
-            lines.append(Text(f"+ {hidden} interfaces hidden; resize the terminal to see more", style=palette.faint))
+            lines.append(
+                Text(f"+ {hidden} interfaces hidden; resize the terminal to see more", style=palette.faint)
+            )
         elif not interfaces:
             lines.append(Text("Per-interface counters are unavailable.", style=palette.faint))
         return _join(lines, w, h)
@@ -1451,15 +1709,18 @@ class HostedSitesPanel(Widget):
             if index:
                 header.append("  ")
             value = clip(label, width)
-            header.append(f"{value:<{width}}" if align == "left" else f"{value:>{width}}",
-                          style=f"bold {palette.dim}")
+            header.append(
+                f"{value:<{width}}" if align == "left" else f"{value:>{width}}", style=f"bold {palette.dim}"
+            )
         lines = [_pad_text(header, w)]
         if not self.websites:
             lines.append(_pad_text(Text("No local HTTP services detected.", style=palette.faint), w))
-        for site in sorted(self.websites, key=lambda item: item.url)[:max(0, h - 1)]:
+        for site in sorted(self.websites, key=lambda item: item.url)[: max(0, h - 1)]:
             status = str(site.status_code) if site.status_code is not None else "-"
-            status_color = palette.green if site.status_code is not None and 200 <= site.status_code < 400 else (
-                palette.red if site.status_code is not None else palette.dim
+            status_color = (
+                palette.green
+                if site.status_code is not None and 200 <= site.status_code < 400
+                else (palette.red if site.status_code is not None else palette.dim)
             )
             values = [
                 (site.url, url_width, "left", palette.cyan),
@@ -1514,12 +1775,15 @@ class ListeningPortsPanel(Widget):
             if index:
                 header.append("  ")
             value = clip(label, width)
-            header.append(f"{value:<{width}}" if align == "left" else f"{value:>{width}}",
-                          style=f"bold {palette.dim}")
+            header.append(
+                f"{value:<{width}}" if align == "left" else f"{value:>{width}}", style=f"bold {palette.dim}"
+            )
         lines = [_pad_text(header, w)]
         if not self.listeners:
             lines.append(_pad_text(Text("No listening ports detected.", style=palette.faint), w))
-        for listener in sorted(self.listeners, key=lambda item: (item.port, item.protocol, item.pid or 0))[:max(0, h - 1)]:
+        for listener in sorted(self.listeners, key=lambda item: (item.port, item.protocol, item.pid or 0))[
+            : max(0, h - 1)
+        ]:
             values = [
                 (str(listener.port), port_width, "right", palette.cyan),
                 (listener.protocol, protocol_width, "left", palette.accent),
@@ -1556,14 +1820,31 @@ class InsightsPanel(Widget):
         palette = get_palette()
         w, h = max(1, self.size.width), max(1, self.size.height)
         if not self.insights:
-            return _join([Text("No current conditions crossed the insight thresholds.", style=palette.green),
-                          Text("Checks use only measurements available in this snapshot.", style=palette.dim)], w, h)
+            return _join(
+                [
+                    Text("No current conditions crossed the insight thresholds.", style=palette.green),
+                    Text("Checks use only measurements available in this snapshot.", style=palette.dim),
+                ],
+                w,
+                h,
+            )
         lines: list[Text] = []
         for item in self.insights:
-            color = {"high": palette.red, "warn": palette.yellow, "info": palette.cyan}.get(item.severity, palette.dim)
+            color = {"high": palette.red, "warn": palette.yellow, "info": palette.cyan}.get(
+                item.severity, palette.dim
+            )
             lines.append(_line([("● ", color), (item.title, f"bold {palette.text}")], w))
-            lines.append(_line([("  ", palette.faint), (item.evidence, palette.dim),
-                                ("   → ", palette.faint), (item.tab, palette.accent)], w))
+            lines.append(
+                _line(
+                    [
+                        ("  ", palette.faint),
+                        (item.evidence, palette.dim),
+                        ("   → ", palette.faint),
+                        (item.tab, palette.accent),
+                    ],
+                    w,
+                )
+            )
             lines.append(Text(""))
         return _join(lines, w, h)
 
@@ -1625,20 +1906,35 @@ class GpuProcTable(Widget):
             process_width = min(natural_process_width, remaining)
             command_width = details_width = 0
         header = [
-            (f"{'PID':<9}", palette.dim), (" ", palette.dim),
-            (f"{'G':>1}", palette.dim), (" ", palette.dim),
-            (f"{'T':>1}", palette.dim), (" ", palette.dim),
-            (f"{'CPU%':>5}", palette.dim), (" ", palette.dim),
-            (f"{'RAM%':>5}", palette.dim), (" ", palette.dim),
-            (f"{'SM%':>3}", palette.dim), (" ", palette.dim),
-            (f"{'GMBW%':>5}", palette.dim), (" ", palette.dim),
-            (f"{'VRAM':>9}", palette.dim), (" ", palette.dim),
-            (f"{'TIME':>8}", palette.dim), (" ", palette.dim),
+            (f"{'PID':<9}", palette.dim),
+            (" ", palette.dim),
+            (f"{'G':>1}", palette.dim),
+            (" ", palette.dim),
+            (f"{'T':>1}", palette.dim),
+            (" ", palette.dim),
+            (f"{'CPU%':>5}", palette.dim),
+            (" ", palette.dim),
+            (f"{'RAM%':>5}", palette.dim),
+            (" ", palette.dim),
+            (f"{'SM%':>3}", palette.dim),
+            (" ", palette.dim),
+            (f"{'GMBW%':>5}", palette.dim),
+            (" ", palette.dim),
+            (f"{'VRAM':>9}", palette.dim),
+            (" ", palette.dim),
+            (f"{'TIME':>8}", palette.dim),
+            (" ", palette.dim),
             (f"{'PROCESS':<{process_width}}", palette.dim),
         ]
         if show_details:
-            header.extend([(" ", palette.dim), (f"{'DETAILS':<{details_width}}", palette.dim),
-                           (" ", palette.dim), (f"{'COMMAND':<{command_width}}", palette.dim)])
+            header.extend(
+                [
+                    (" ", palette.dim),
+                    (f"{'DETAILS':<{details_width}}", palette.dim),
+                    (" ", palette.dim),
+                    (f"{'COMMAND':<{command_width}}", palette.dim),
+                ]
+            )
         elif show_command:
             header.extend([(" ", palette.dim), (f"{'COMMAND':<{command_width}}", palette.dim)])
         lines.append(_line(header, w))
@@ -1693,8 +1989,14 @@ class GpuProcTable(Widget):
             ]
             if show_details:
                 details = _gpu_process_details(proc, self.active_projects)
-                parts.extend([(" ", ""), (f"{clip(details or '-', details_width):<{details_width}}", palette.text),
-                              (" ", ""), (clip(proc.cmd or proc.name, command_width), palette.dim)])
+                parts.extend(
+                    [
+                        (" ", ""),
+                        (f"{clip(details or '-', details_width):<{details_width}}", palette.text),
+                        (" ", ""),
+                        (clip(proc.cmd or proc.name, command_width), palette.dim),
+                    ]
+                )
             elif show_command:
                 parts.extend([(" ", ""), (clip(proc.cmd or proc.name, command_width), palette.dim)])
             lines.append(_line(parts, w, base))
@@ -1715,7 +2017,9 @@ class ProcTable(Widget):
         self.sort_direction = 0
         self.show_gpu_columns = True
 
-    def _column_specs(self, width: int, show_gpu_columns: Optional[bool] = None) -> list[tuple[str, str, int]]:
+    def _column_specs(
+        self, width: int, show_gpu_columns: Optional[bool] = None
+    ) -> list[tuple[str, str, int]]:
         compact = width < 112
         specs = [
             ("pid", "PID", 9),
@@ -1726,14 +2030,16 @@ class ProcTable(Widget):
         ]
         include_gpu = self.show_gpu_columns if show_gpu_columns is None else show_gpu_columns
         if include_gpu:
-            specs.extend([
-                ("gpu", "GPU", 4 if compact else 6),
-                ("type", "T", 1),
-                ("sm", "SM%", 4),
-                ("gmbw", "GMBW%", 5),
-                ("vram", "VRAM", 8 if compact else 10),
-                ("time", "TIME", 8),
-            ])
+            specs.extend(
+                [
+                    ("gpu", "GPU", 4 if compact else 6),
+                    ("type", "T", 1),
+                    ("sm", "SM%", 4),
+                    ("gmbw", "GMBW%", 5),
+                    ("vram", "VRAM", 8 if compact else 10),
+                    ("time", "TIME", 8),
+                ]
+            )
         command_width = max(1, width - sum(spec[2] for spec in specs) - len(specs))
         specs.append(("process", "PROCESS", command_width))
         return specs
@@ -1787,14 +2093,18 @@ class ProcTable(Widget):
                 label = f"{clip(label, width - 2)} {'↑' if self.sort_direction > 0 else '↓'}"
             label = clip(label, width)
             align = "left" if column in left_aligned else "right"
-            style = f"bold underline {palette.accent}" if column == self.sort_column else f"underline {palette.dim}"
+            style = (
+                f"bold underline {palette.accent}"
+                if column == self.sort_column
+                else f"underline {palette.dim}"
+            )
             header.append(f"{label:<{width}}" if align == "left" else f"{label:>{width}}", style=style)
         lines = [_pad_text(header, w)]
         visible = max(1, h - 1)
         selected = min(max(0, self.selected), max(0, len(self.processes) - 1))
         start = max(0, selected - visible + 1)
         start = min(start, max(0, len(self.processes) - visible))
-        for index, proc in enumerate(self.processes[start:start + visible], start):
+        for index, proc in enumerate(self.processes[start : start + visible], start):
             selected_row = index == selected
             base = f"on {palette.selected_bg} {palette.selected_fg}" if selected_row else ""
             values = {
@@ -1849,7 +2159,11 @@ class ProcTable(Widget):
                 label = f"{clip(label, width - 2)} {arrow}"
             label = clip(label, width)
             cell = f"{label:<{width}}" if column in left_aligned else f"{label:>{width}}"
-            style = f"bold underline {palette.accent}" if column == self.sort_column else f"underline {palette.dim}"
+            style = (
+                f"bold underline {palette.accent}"
+                if column == self.sort_column
+                else f"underline {palette.dim}"
+            )
             header.append(cell, style=style)
         lines.append(_pad_text(header, w))
         visible = max(1, h - 1)
@@ -1869,7 +2183,10 @@ class ProcTable(Widget):
             kinds = list(dict.fromkeys(item.kind for item in gpu_entries))
             gpu_kind = kinds[0] if len(kinds) == 1 else ("*" if kinds else "—")
             sm = "/".join(f"{item.sm:.0f}" if item.sm is not None else "-" for item in gpu_entries) or "—"
-            gmbw = "/".join(f"{item.gmbw_pct:.0f}" if item.gmbw_pct is not None else "-" for item in gpu_entries) or "—"
+            gmbw = (
+                "/".join(f"{item.gmbw_pct:.0f}" if item.gmbw_pct is not None else "-" for item in gpu_entries)
+                or "—"
+            )
             allocated = [item.vram for item in gpu_entries if item.vram is not None]
             vram = _gpu_memory(sum(allocated)) if allocated else "—"
             runtimes = [item.runtime_s for item in gpu_entries if item.runtime_s is not None]
@@ -1893,24 +2210,43 @@ class ProcTable(Widget):
                 (f"{human_bytes(proc.rss):>{rss_width}}", palette.dim),
             ]
             if self.show_gpu_columns:
-                parts.extend([
+                parts.extend(
+                    [
+                        (" ", ""),
+                        (
+                            f"{clip(gpu_ids, gpu_width):>{gpu_width}}",
+                            palette.accent if gpu_entries else palette.faint,
+                        ),
+                        (" ", ""),
+                        (
+                            f"{clip(gpu_kind, kind_width):>{kind_width}}",
+                            palette.magenta if gpu_entries else palette.faint,
+                        ),
+                        (" ", ""),
+                        (
+                            f"{clip(sm, sm_width):>{sm_width}}",
+                            palette.green if gpu_entries else palette.faint,
+                        ),
+                        (" ", ""),
+                        (
+                            f"{clip(gmbw, gmbw_width):>{gmbw_width}}",
+                            palette.cyan if gpu_entries else palette.faint,
+                        ),
+                        (" ", ""),
+                        (
+                            f"{clip(vram, vram_width):>{vram_width}}",
+                            palette.yellow if gpu_entries else palette.faint,
+                        ),
+                        (" ", ""),
+                        (f"{clip(runtime, time_width):>{time_width}}", palette.dim),
+                    ]
+                )
+            parts.extend(
+                [
                     (" ", ""),
-                    (f"{clip(gpu_ids, gpu_width):>{gpu_width}}", palette.accent if gpu_entries else palette.faint),
-                    (" ", ""),
-                    (f"{clip(gpu_kind, kind_width):>{kind_width}}", palette.magenta if gpu_entries else palette.faint),
-                    (" ", ""),
-                    (f"{clip(sm, sm_width):>{sm_width}}", palette.green if gpu_entries else palette.faint),
-                    (" ", ""),
-                    (f"{clip(gmbw, gmbw_width):>{gmbw_width}}", palette.cyan if gpu_entries else palette.faint),
-                    (" ", ""),
-                    (f"{clip(vram, vram_width):>{vram_width}}", palette.yellow if gpu_entries else palette.faint),
-                    (" ", ""),
-                    (f"{clip(runtime, time_width):>{time_width}}", palette.dim),
-                ])
-            parts.extend([
-                (" ", ""),
-                (clip(proc.cmd or proc.name, cmd_w), palette.text if selected_row else palette.dim),
-            ])
+                    (clip(proc.cmd or proc.name, cmd_w), palette.text if selected_row else palette.dim),
+                ]
+            )
             lines.append(_line(parts, w, base))
         return _join(lines, w, h)
 
@@ -2042,24 +2378,44 @@ class AgentTable(Widget):
 
     def _render_wide(self, w: int, h: int, palette, lines: list[Text]) -> Text:
         columns = {
-            "agent": 3, "pid": 9, "project": 12, "session": 8, "summary": 20,
-            "status": 7, "model": 12, "pct": 4, "tokens": 7, "mem": 6, "turn": 4,
+            "agent": 3,
+            "pid": 9,
+            "project": 12,
+            "session": 8,
+            "summary": 20,
+            "status": 7,
+            "model": 12,
+            "pct": 4,
+            "tokens": 7,
+            "mem": 6,
+            "turn": 4,
         }
         separators = 11
         fixed = sum(columns.values()) + separators
         context_width = max(5, w - fixed)
         headings = [
-            (f"{'AI':<{columns['agent']}}", palette.dim), (" ", ""),
-            (f"{'PID':>{columns['pid']}}", palette.dim), (" ", ""),
-            (f"{'PROJECT':<{columns['project']}}", palette.dim), (" ", ""),
-            (f"{'SESSION':<{columns['session']}}", palette.dim), (" ", ""),
-            (f"{'SUMMARY':<{columns['summary']}}", palette.dim), (" ", ""),
-            (f"{'STATE':<{columns['status']}}", palette.dim), (" ", ""),
-            (f"{'MODEL':<{columns['model']}}", palette.dim), (" ", ""),
-            (f"{'CONTEXT':<{context_width}}", palette.dim), (" ", ""),
-            (f"{'USE%':>{columns['pct']}}", palette.dim), (" ", ""),
-            (f"{'TOKENS':>{columns['tokens']}}", palette.dim), (" ", ""),
-            (f"{'MEM':>{columns['mem']}}", palette.dim), (" ", ""),
+            (f"{'AI':<{columns['agent']}}", palette.dim),
+            (" ", ""),
+            (f"{'PID':>{columns['pid']}}", palette.dim),
+            (" ", ""),
+            (f"{'PROJECT':<{columns['project']}}", palette.dim),
+            (" ", ""),
+            (f"{'SESSION':<{columns['session']}}", palette.dim),
+            (" ", ""),
+            (f"{'SUMMARY':<{columns['summary']}}", palette.dim),
+            (" ", ""),
+            (f"{'STATE':<{columns['status']}}", palette.dim),
+            (" ", ""),
+            (f"{'MODEL':<{columns['model']}}", palette.dim),
+            (" ", ""),
+            (f"{'CONTEXT':<{context_width}}", palette.dim),
+            (" ", ""),
+            (f"{'USE%':>{columns['pct']}}", palette.dim),
+            (" ", ""),
+            (f"{'TOKENS':>{columns['tokens']}}", palette.dim),
+            (" ", ""),
+            (f"{'MEM':>{columns['mem']}}", palette.dim),
+            (" ", ""),
             (f"{'TURN':>{columns['turn']}}", palette.dim),
         ]
         lines.append(_line(headings, w))
@@ -2067,7 +2423,7 @@ class AgentTable(Widget):
         selected = min(max(0, self.selected), len(self.sessions) - 1)
         start = max(0, selected - visible + 1)
         start = min(start, max(0, len(self.sessions) - visible))
-        for offset, session in enumerate(self.sessions[start:start + visible]):
+        for offset, session in enumerate(self.sessions[start : start + visible]):
             idx = start + offset
             chosen = idx == selected
             base = f"on {palette.selected_bg} {palette.selected_fg}" if chosen else ""
@@ -2088,25 +2444,37 @@ class AgentTable(Widget):
             summary = session.summary or session.current_task or "—"
             pct = f"{context_pct:3.0f}%" if context_pct is not None else "—"
             mem = f"{session.mem_mb}M" if session.mem_mb else "—"
-            agent_color = {"claude": palette.orange, "codex": palette.cyan,
-                           "opencode": palette.green}.get(session.agent, palette.dim)
+            agent_color = {"claude": palette.orange, "codex": palette.cyan, "opencode": palette.green}.get(
+                session.agent, palette.dim
+            )
             row = Text(style=base)
             for value, style in [
-                (f"{session.agent_label:<{columns['agent']}}", f"bold {agent_color}"), (" ", ""),
-                (f"{session.pid:>{columns['pid']}}", palette.faint), (" ", ""),
-                (f"{project:<{columns['project']}}", palette.text), (" ", ""),
-                (f"{session.session_id[:columns['session']]:<{columns['session']}}", palette.accent), (" ", ""),
-                (f"{clip(summary, columns['summary']):<{columns['summary']}}", palette.text), (" ", ""),
-                (f"{status:<{columns['status']}}", status_color), (" ", ""),
-                (f"{clip(model, columns['model']):<{columns['model']}}", palette.magenta), (" ", ""),
+                (f"{session.agent_label:<{columns['agent']}}", f"bold {agent_color}"),
+                (" ", ""),
+                (f"{session.pid:>{columns['pid']}}", palette.faint),
+                (" ", ""),
+                (f"{project:<{columns['project']}}", palette.text),
+                (" ", ""),
+                (f"{session.session_id[: columns['session']]:<{columns['session']}}", palette.accent),
+                (" ", ""),
+                (f"{clip(summary, columns['summary']):<{columns['summary']}}", palette.text),
+                (" ", ""),
+                (f"{status:<{columns['status']}}", status_color),
+                (" ", ""),
+                (f"{clip(model, columns['model']):<{columns['model']}}", palette.magenta),
+                (" ", ""),
             ]:
                 row.append(value, style=style or None)
             bar = _context_bar(context_pct, context_width, palette, selected=chosen)
             row.append_text(bar)
             for value, style in [
-                (" ", ""), (f"{pct:>{columns['pct']}}", palette.dim), (" ", ""),
-                (f"{human_tokens(session.total_tokens):>{columns['tokens']}}", palette.text), (" ", ""),
-                (f"{mem:>{columns['mem']}}", palette.dim), (" ", ""),
+                (" ", ""),
+                (f"{pct:>{columns['pct']}}", palette.dim),
+                (" ", ""),
+                (f"{human_tokens(session.total_tokens):>{columns['tokens']}}", palette.text),
+                (" ", ""),
+                (f"{mem:>{columns['mem']}}", palette.dim),
+                (" ", ""),
                 (f"{session.turn_count:>{columns['turn']}}", palette.dim),
             ]:
                 row.append(value, style=style or None)
@@ -2142,10 +2510,15 @@ class TokenOverview(Widget):
         if session is None:
             return _join([Text("select an agent session to inspect tokens", style=palette.dim)], w, h)
         total = session.total_tokens
-        lines = [_line([
-            (f"Total: {human_tokens(total)}", f"bold {palette.text}"),
-            (f"    {human_tokens(self.token_rate * 60)}/min", f"bold {palette.green}"),
-        ], w)]
+        lines = [
+            _line(
+                [
+                    (f"Total: {human_tokens(total)}", f"bold {palette.text}"),
+                    (f"    {human_tokens(self.token_rate * 60)}/min", f"bold {palette.green}"),
+                ],
+                w,
+            )
+        ]
         rows = (
             ("Input", session.input_tokens),
             ("Output", session.output_tokens),
@@ -2160,44 +2533,56 @@ class TokenOverview(Widget):
             row = Text()
             row.append(f"{label:<8}: ", style=palette.dim)
             relative = value / total * 100 if total else 0.0
-            row.append_text(
-                _context_bar(relative, bar_w, palette, fill_pct=relative * 0.88)
-            )
+            row.append_text(_context_bar(relative, bar_w, palette, fill_pct=relative * 0.88))
             row.append(f" {human_tokens(value):>{value_w}}", style=palette.text)
             lines.append(_pad_text(row, w))
         if h >= 6:
-            lines.append(_line([
-                ("Token rate · ", palette.dim),
-                (f"{human_tokens(self.token_rate * 60)}/min", f"bold {palette.green}"),
-            ], w))
+            lines.append(
+                _line(
+                    [
+                        ("Token rate · ", palette.dim),
+                        (f"{human_tokens(self.token_rate * 60)}/min", f"bold {palette.green}"),
+                    ],
+                    w,
+                )
+            )
             graph_rows = h - len(lines) - 2  # divider and footer
             rate_graph_h = (graph_rows + 1) // 2
             turn_graph_h = graph_rows - rate_graph_h
             rate_values = self.rate_history or [0.0]
-            lines.extend(braille_graph(
-                rate_values,
-                w,
-                rate_graph_h,
-                palette,
-                maximum=max(rate_values) * 1.1 or 1.0,
-                color_by="value",
-            ))
+            lines.extend(
+                braille_graph(
+                    rate_values,
+                    w,
+                    rate_graph_h,
+                    palette,
+                    maximum=max(rate_values) * 1.1 or 1.0,
+                    color_by="value",
+                )
+            )
             lines.append(Text("─" * w, style=palette.faint))
             turn_values = session.token_history or [0]
-            lines.extend(braille_graph(
-                turn_values,
-                w,
-                turn_graph_h,
-                palette,
-                maximum=max(turn_values) * 1.1 or 1.0,
-                color_by="value",
-            ))
+            lines.extend(
+                braille_graph(
+                    turn_values,
+                    w,
+                    turn_graph_h,
+                    palette,
+                    maximum=max(turn_values) * 1.1 or 1.0,
+                    color_by="value",
+                )
+            )
             avg = total / session.turn_count if session.turn_count else 0
-            lines.append(_line([
-                ("Tokens/Turn · ", palette.dim),
-                (f"Turns: {session.turn_count}", palette.dim),
-                (f"    Avg: {human_tokens(avg)}/t", palette.dim),
-            ], w))
+            lines.append(
+                _line(
+                    [
+                        ("Tokens/Turn · ", palette.dim),
+                        (f"Turns: {session.turn_count}", palette.dim),
+                        (f"    Avg: {human_tokens(avg)}/t", palette.dim),
+                    ],
+                    w,
+                )
+            )
         return _join(lines, w, h)
 
 
@@ -2232,19 +2617,35 @@ class AgentPortsPanel(Widget):
         pid_width = 9
         gap = 2
         command_width = max(1, w - port_width - project_width - pid_width - gap * 3)
-        lines = [_line([
-            (f"{'PORT':>{port_width}}", palette.dim), ("  ", ""),
-            (f"{'PROJECT':<{project_width}}", palette.dim), ("  ", ""),
-            (f"{'PID':>{pid_width}}", palette.dim), ("  ", ""),
-            (f"{'PROCESS':<{command_width}}", palette.dim),
-        ], w)]
-        for session, child in rows[:max(0, h - 1)]:
-            lines.append(_line([
-                (f"{child.port:>{port_width}}", palette.cyan), ("  ", ""),
-                (f"{clip(session.project, project_width):<{project_width}}", palette.text), ("  ", ""),
-                (f"{child.pid:>{pid_width}}", palette.faint), ("  ", ""),
-                (clip(child.command, command_width), palette.dim),
-            ], w))
+        lines = [
+            _line(
+                [
+                    (f"{'PORT':>{port_width}}", palette.dim),
+                    ("  ", ""),
+                    (f"{'PROJECT':<{project_width}}", palette.dim),
+                    ("  ", ""),
+                    (f"{'PID':>{pid_width}}", palette.dim),
+                    ("  ", ""),
+                    (f"{'PROCESS':<{command_width}}", palette.dim),
+                ],
+                w,
+            )
+        ]
+        for session, child in rows[: max(0, h - 1)]:
+            lines.append(
+                _line(
+                    [
+                        (f"{child.port:>{port_width}}", palette.cyan),
+                        ("  ", ""),
+                        (f"{clip(session.project, project_width):<{project_width}}", palette.text),
+                        ("  ", ""),
+                        (f"{child.pid:>{pid_width}}", palette.faint),
+                        ("  ", ""),
+                        (clip(child.command, command_width), palette.dim),
+                    ],
+                    w,
+                )
+            )
         hidden = len(rows) - min(len(rows), max(0, h - 1))
         if hidden and len(lines) < h:
             lines.append(Text(f"+ {hidden} more ports", style=palette.faint))
@@ -2361,18 +2762,24 @@ class SessionDetail(Widget):
                         (clip(truncate_middle(s.cwd or "-", max(8, w - 12)), w - 10), palette.dim),
                         (" ", ""),
                         (s.git_branch or "", palette.faint),
-                    ]
-                , w)
+                    ],
+                    w,
+                )
             )
         if h > 3:
             model = s.model or "unknown model"
-            lines.append(_line([
-                (f"PID {s.pid or '—'}", palette.faint),
-                (f"   MEM {s.mem_mb}M", palette.text),
-                (f"   TURNS {s.turn_count}", palette.dim),
-                (f"   SUBAGENTS {s.subagent_count}", palette.dim),
-                (f"   {clip(model, max(8, w // 3))}", palette.magenta),
-            ], w))
+            lines.append(
+                _line(
+                    [
+                        (f"PID {s.pid or '—'}", palette.faint),
+                        (f"   MEM {s.mem_mb}M", palette.text),
+                        (f"   TURNS {s.turn_count}", palette.dim),
+                        (f"   SUBAGENTS {s.subagent_count}", palette.dim),
+                        (f"   {clip(model, max(8, w // 3))}", palette.magenta),
+                    ],
+                    w,
+                )
+            )
         if h > 3:
             ctx = f"{s.context_pct:.0f}%" if s.context_pct is not None else "—"
             used = human_tokens(s.context_tokens)
@@ -2502,15 +2909,9 @@ class Header(Widget):
             )
             line += f" · agents {sum(1 for a in s.agents if a.is_active)}/{len(s.agents)}"
             return _line([(clip(line, w), palette.text)], w)
-        info1 = (
-            f"{s.hostname}  ·  {s.username}  ·  up {human_duration(s.uptime, short=True)}  ·  "
-            f"{s.os_name}"
-        )
+        info1 = f"{s.hostname}  ·  {s.username}  ·  up {human_duration(s.uptime, short=True)}  ·  {s.os_name}"
         if self.view == "gpu":
-            info2 = (
-                f"{s.task_count} Tasks  ·  {s.thread_count} Threads  ·  "
-                f"{time.strftime('%H:%M:%S')}"
-            )
+            info2 = f"{s.task_count} Tasks  ·  {s.thread_count} Threads  ·  {time.strftime('%H:%M:%S')}"
         else:
             info2 = (
                 f"CPU {s.cpu.percent:4.1f}%  ·  RAM {s.mem.percent:4.1f}%  ·  "
@@ -2631,20 +3032,32 @@ class Footer(Widget):
                     left.append("  f search  / column regex", style=palette.dim)
             else:
                 keys = [
-                    ("q", f"bold {palette.accent}"), (" quit  ", palette.dim),
-                    ("?", f"bold {palette.accent}"), (" help  ", palette.dim),
-                    ("j/k", f"bold {palette.accent}"), (" move  ", palette.dim),
-                    ("Tab", f"bold {palette.accent}"), (" focus  ", palette.dim),
-                    ("x", f"bold {palette.accent}"), (" kill  ", palette.dim),
-                    ("a", f"bold {palette.accent}"), (" scope  ", palette.dim),
-                    ("t", f"bold {palette.accent}"), (" theme  ", palette.dim),
-                    ("p", f"bold {palette.accent}"), (" pause  ", palette.dim),
+                    ("q", f"bold {palette.accent}"),
+                    (" quit  ", palette.dim),
+                    ("?", f"bold {palette.accent}"),
+                    (" help  ", palette.dim),
+                    ("j/k", f"bold {palette.accent}"),
+                    (" move  ", palette.dim),
+                    ("Tab", f"bold {palette.accent}"),
+                    (" focus  ", palette.dim),
+                    ("x", f"bold {palette.accent}"),
+                    (" kill  ", palette.dim),
+                    ("a", f"bold {palette.accent}"),
+                    (" scope  ", palette.dim),
+                    ("t", f"bold {palette.accent}"),
+                    (" theme  ", palette.dim),
+                    ("p", f"bold {palette.accent}"),
+                    (" pause  ", palette.dim),
                 ]
                 if self.view == "procs":
-                    keys.extend([
-                        ("f", f"bold {palette.accent}"), (" search  ", palette.dim),
-                        ("/", f"bold {palette.accent}"), (" column regex  ", palette.dim),
-                    ])
+                    keys.extend(
+                        [
+                            ("f", f"bold {palette.accent}"),
+                            (" search  ", palette.dim),
+                            ("/", f"bold {palette.accent}"),
+                            (" column regex  ", palette.dim),
+                        ]
+                    )
                 for value, style in keys:
                     left.append(value, style=style)
             if self.insight_summary:
@@ -2653,8 +3066,12 @@ class Footer(Widget):
         if w < 64:
             navigation = Text()
             compact_views = [
-                ("0", "O", "overview"), ("1", "C", "cpu"), ("2", "G", "gpu"),
-                ("3", "N", "net"), ("4", "M", "memory"), ("5", "P", "procs"),
+                ("0", "O", "overview"),
+                ("1", "C", "cpu"),
+                ("2", "G", "gpu"),
+                ("3", "N", "net"),
+                ("4", "M", "memory"),
+                ("5", "P", "procs"),
                 ("6", "A", "agents"),
             ]
             for index, (key, label, view) in enumerate(compact_views):

@@ -153,9 +153,7 @@ class GpuCollector:
     ) -> Optional[list[GpuProcess]]:
         return self._processes(proc_index, gpus)
 
-    def _processes(
-        self, proc_index: dict[int, ProcInfo], gpus: list[GpuInfo]
-    ) -> Optional[list[GpuProcess]]:
+    def _processes(self, proc_index: dict[int, ProcInfo], gpus: list[GpuInfo]) -> Optional[list[GpuProcess]]:
         apps: dict[int, int] = {}
         app_out = self._run(
             [

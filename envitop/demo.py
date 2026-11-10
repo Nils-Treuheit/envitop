@@ -47,7 +47,9 @@ class DemoSource:
         """Pre-fill graphs so the first frame already looks like btop."""
         for i in range(120):
             t = -0.5 * (120 - i)
-            self._cpu_hist.append(42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95))
+            self._cpu_hist.append(
+                42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95)
+            )
             self._mem_hist.append(46 + 8 * math.sin(t / 18) + 3 * math.sin(t / 4.2))
             gpu = 54 + 27 * math.sin(t / 8) + 17 * math.sin(t / 2.3)
             gpu += 16 * max(0.0, math.sin(t / 11)) ** 10
@@ -156,7 +158,10 @@ class DemoSource:
             write_history=list(self._write_hist),
             mounts=[
                 MountInfo(
-                    "/", int(412 * GB), 931 * GB, 44,
+                    "/",
+                    int(412 * GB),
+                    931 * GB,
+                    44,
                     free=519 * GB,
                     read_rate=self._read_hist[-1] * 0.28,
                     write_rate=self._write_hist[-1] * 0.16,
@@ -164,7 +169,10 @@ class DemoSource:
                     write_history=[value * 0.16 for value in self._write_hist],
                 ),
                 MountInfo(
-                    "/mnt/data", int(3.2e12), int(4.0e12), 80,
+                    "/mnt/data",
+                    int(3.2e12),
+                    int(4.0e12),
+                    80,
                     free=int(0.8e12),
                     read_rate=self._read_hist[-1] * 0.72,
                     write_rate=self._write_hist[-1] * 0.84,
@@ -203,6 +211,7 @@ class DemoSource:
                 GpuProcess(0, 6668, "gnome-shell", "G", 2, 1, int(0.4 * GB), "nils"),
             ],
         )
+
         def turn_samples(seed: float, mean: float, amplitude: float) -> list[int]:
             return [
                 max(
@@ -351,7 +360,11 @@ class DemoSource:
                     ChildProc(82431, "python -m compileall -q envitop", 124_000, None),
                     ChildProc(82457, "cargo check --release", 662_000, None),
                 ],
-                tools=[("Read", "envitop/demo.py"), ("Edit", "docs/envitop-demo.svg"), ("Bash", "cargo check --release")],
+                tools=[
+                    ("Read", "envitop/demo.py"),
+                    ("Edit", "docs/envitop-demo.svg"),
+                    ("Bash", "cargo check --release"),
+                ],
                 chat=[("ai", "The demo now includes bursty IO, CPU and GPU histories.")],
                 token_history=turn_samples(2.8, 4_600, 2_100),
             ),
@@ -437,21 +450,85 @@ class DemoSource:
             ),
         ]
         procs = [
-            ProcInfo(61204, "python3", "nils", 17.2, 14.2, int(4.1 * GB), "python -m train.ddp --config configs/large.toml", ppid=1, gpu_index=0, gpu_sm=82, gpu_mem_pct=54),
-            ProcInfo(73912, "codex", "nils", 3.7, 3.1, int(1.2 * GB), "codex exec --full-auto", ppid=4211, gpu_index=0, gpu_sm=47, gpu_mem_pct=32),
+            ProcInfo(
+                61204,
+                "python3",
+                "nils",
+                17.2,
+                14.2,
+                int(4.1 * GB),
+                "python -m train.ddp --config configs/large.toml",
+                ppid=1,
+                gpu_index=0,
+                gpu_sm=82,
+                gpu_mem_pct=54,
+            ),
+            ProcInfo(
+                73912,
+                "codex",
+                "nils",
+                3.7,
+                3.1,
+                int(1.2 * GB),
+                "codex exec --full-auto",
+                ppid=4211,
+                gpu_index=0,
+                gpu_sm=47,
+                gpu_mem_pct=32,
+            ),
             ProcInfo(81900, "opencode", "nils", 31.2, 2.0, int(0.9 * GB), "opencode", ppid=1),
-            ProcInfo(82416, "codex", "nils", 24.6, 2.8, int(1.1 * GB), "codex exec --full-auto --title envitop-demo", ppid=1),
+            ProcInfo(
+                82416,
+                "codex",
+                "nils",
+                24.6,
+                2.8,
+                int(1.1 * GB),
+                "codex exec --full-auto --title envitop-demo",
+                ppid=1,
+            ),
             ProcInfo(82642, "claude", "nils", 15.2, 1.9, int(0.7 * GB), "claude --project docs-site", ppid=1),
             ProcInfo(4120, "firefox", "nils", 22.8, 6.4, int(2.8 * GB), "firefox --new-window", ppid=1),
-            ProcInfo(9412, "gnome-shell", "nils", 18.4, 2.1, int(0.8 * GB), "gnome-shell --mode=user", ppid=1),
-            ProcInfo(61344, "uvicorn", "nils", 12.6, 2.6, int(1.0 * GB), "uvicorn api.main:app --port 8080", ppid=61204),
-            ProcInfo(82431, "python", "nils", 7.2, 0.8, int(124 * MB), "python -m compileall -q envitop", ppid=82416),
+            ProcInfo(
+                9412, "gnome-shell", "nils", 18.4, 2.1, int(0.8 * GB), "gnome-shell --mode=user", ppid=1
+            ),
+            ProcInfo(
+                61344,
+                "uvicorn",
+                "nils",
+                12.6,
+                2.6,
+                int(1.0 * GB),
+                "uvicorn api.main:app --port 8080",
+                ppid=61204,
+            ),
+            ProcInfo(
+                82431,
+                "python",
+                "nils",
+                7.2,
+                0.8,
+                int(124 * MB),
+                "python -m compileall -q envitop",
+                ppid=82416,
+            ),
             ProcInfo(82457, "rustc", "nils", 43.1, 4.6, int(1.8 * GB), "cargo check --release", ppid=82416),
             ProcInfo(82655, "node", "nils", 8.6, 0.7, int(326 * MB), "npm run build", ppid=82642),
-            ProcInfo(82682, "node", "nils", 2.4, 0.2, int(112 * MB), "node scripts/check_links.js", ppid=82642),
+            ProcInfo(
+                82682, "node", "nils", 2.4, 0.2, int(112 * MB), "node scripts/check_links.js", ppid=82642
+            ),
             ProcInfo(6668, "Xorg", "nils", 9.1, 1.2, int(0.6 * GB), "/usr/lib/Xorg vt2 -displayfd 3", ppid=1),
             ProcInfo(311, "systemd", "root", 0.9, 0.1, int(42 * MB), "/sbin/init splash", ppid=0),
-            ProcInfo(2055, "opencode", "nils", 0.4, 0.4, int(180 * MB), "opencode serve --hostname 127.0.0.1", ppid=1),
+            ProcInfo(
+                2055,
+                "opencode",
+                "nils",
+                0.4,
+                0.4,
+                int(180 * MB),
+                "opencode serve --hostname 127.0.0.1",
+                ppid=1,
+            ),
         ]
         token_rate = 1850 + 900 * math.sin(t / 6)
         return Snapshot(

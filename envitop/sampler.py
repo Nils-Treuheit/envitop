@@ -124,9 +124,7 @@ class Sampler(threading.Thread):
                 self._force.clear()
                 self._last_agents = now
                 try:
-                    self._sessions, self._quotas = self.agents.collect(
-                        index, self.scope, self.selected_id
-                    )
+                    self._sessions, self._quotas = self.agents.collect(index, self.scope, self.selected_id)
                     agents_refreshed = True
                 except Exception as exc:
                     errors.append(f"agents: {exc}")
