@@ -3,6 +3,8 @@
 A single terminal dashboard that looks like [btop](https://github.com/aristocratos/btop),
 shows NVIDIA GPUs like [nvitop](https://github.com/XuehaiPan/nvitop), and tracks local AI
 coding agents like [abtop](https://github.com/abtop-dev/abtop).
+This branch's extended TUI is inspired by [Syswatch](https://github.com/matthart1983/syswatch/tree/main) which is a related
+system-monitoring project.
 
 ![Animated tour of EnviTop's Overview, CPU, GPU, Net, Memory, Procs, and Agents tabs](docs/envitop-tabs.gif)
 
@@ -61,11 +63,6 @@ The animation shows each tab for two seconds at 24 frames per second, using one 
 
 Press `0`–`6` to open a tab. The [tab guide](docs/tabs/README.md) describes
 what each view shows and links to a focused page for each one.
-
-## Related project
-
-[Syswatch](https://github.com/matthart1983/syswatch/tree/main) is a related
-system-monitoring project.
 
 ## Requirements
 
