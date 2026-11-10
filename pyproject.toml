@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,9 +8,20 @@ version = "0.1.0"
 description = "A btop-style TUI that unifies system, NVIDIA GPU and AI-agent monitoring"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "envitop contributors" }]
 keywords = ["tui", "monitor", "gpu", "nvidia", "btop", "nvitop", "abtop", "ai-agents"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Topic :: System :: Monitoring",
+  "Topic :: Terminals",
+]
 dependencies = [
   "textual>=0.80",
   "psutil>=5.9",
@@ -22,6 +33,11 @@ dev = ["pytest>=7", "ruff>=0.5"]
 
 [project.scripts]
 envitop = "envitop.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Nils-Treuheit/envitop"
+Repository = "https://github.com/Nils-Treuheit/envitop"
+Issues = "https://github.com/Nils-Treuheit/envitop/issues"
 
 [tool.setuptools.packages.find]
 include = ["envitop*"]

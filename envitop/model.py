@@ -44,6 +44,45 @@ class MemInfo:
 
 
 @dataclass
+class NetProcessInfo:
+    pid: int
+    name: str
+    connections: int = 1
+    rx_rate: Optional[float] = None
+    tx_rate: Optional[float] = None
+
+
+@dataclass
+class NetInterfaceInfo:
+    name: str
+    rx_rate: float = 0.0
+    tx_rate: float = 0.0
+    total_rx: int = 0
+    total_tx: int = 0
+    max_rate: Optional[float] = None  # bytes/s, OS-reported link speed
+    processes: list[NetProcessInfo] = field(default_factory=list)
+
+
+@dataclass
+class NetListenerInfo:
+    port: int
+    protocol: str
+    address: str = ""
+    pid: Optional[int] = None
+    process: str = "-"
+    command: str = ""
+
+
+@dataclass
+class HostedSiteInfo:
+    url: str
+    main_file: str = "-"
+    status_code: Optional[int] = None
+    pid: Optional[int] = None
+    process: str = "-"
+
+
+@dataclass
 class NetInfo:
     rx_rate: float = 0.0
     tx_rate: float = 0.0
@@ -51,6 +90,9 @@ class NetInfo:
     total_tx: int = 0
     rx_history: list[float] = field(default_factory=list)
     tx_history: list[float] = field(default_factory=list)
+    interfaces: list[NetInterfaceInfo] = field(default_factory=list)
+    listeners: list[NetListenerInfo] = field(default_factory=list)
+    websites: list[HostedSiteInfo] = field(default_factory=list)
 
 
 @dataclass
@@ -65,6 +107,10 @@ class MountInfo:
     write_rate: float = 0.0
     read_history: list[float] = field(default_factory=list)
     write_history: list[float] = field(default_factory=list)
+    filesystem: str = ""
+    inodes_total: int = 0
+    inodes_used: int = 0
+    inodes_percent: Optional[float] = None
 
 
 @dataclass
@@ -124,6 +170,7 @@ class GpuInfo:
     pstate: str = ""
     encoder: Optional[float] = None
     decoder: Optional[float] = None
+    mem_util: Optional[float] = None  # memory-bandwidth utilization, percent
     history: list[float] = field(default_factory=list)
     mem_history: list[float] = field(default_factory=list)
 
@@ -137,6 +184,44 @@ class GpuState:
     driver: str = ""
     cuda: str = ""
 
+    @property
+    def aggregate_util(self) -> float:
+        """Mean device utilization, treating each visible GPU as a cluster member."""
+        return sum(gpu.util for gpu in self.gpus) / len(self.gpus) if self.gpus else 0.0
+
+    @property
+    def aggregate_mem_util(self) -> Optional[float]:
+        values = [gpu.mem_util for gpu in self.gpus if gpu.mem_util is not None]
+        return sum(values) / len(values) if values else None
+
+    @property
+    def aggregate_mem_used(self) -> int:
+        return sum(gpu.mem_used for gpu in self.gpus)
+
+    @property
+    def aggregate_mem_total(self) -> int:
+        return sum(gpu.mem_total for gpu in self.gpus)
+
+    @property
+    def aggregate_mem_percent(self) -> float:
+        total = self.aggregate_mem_total
+        return self.aggregate_mem_used / total * 100.0 if total else 0.0
+
+    @property
+    def aggregate_power_w(self) -> Optional[float]:
+        values = [gpu.power_w for gpu in self.gpus if gpu.power_w is not None]
+        return sum(values) if values else None
+
+    @property
+    def aggregate_power_limit_w(self) -> Optional[float]:
+        values = [gpu.power_limit_w for gpu in self.gpus if gpu.power_limit_w is not None]
+        return sum(values) if values else None
+
+    @property
+    def hottest_temp_c(self) -> Optional[float]:
+        values = [gpu.temp_c for gpu in self.gpus if gpu.temp_c is not None]
+        return max(values) if values else None
+
 
 # ---------------------------------------------------------------------------
 # Processes
@@ -148,7 +233,7 @@ class ProcInfo:
     pid: int
     name: str
     user: str = ""
-    cpu: float = 0.0
+    cpu: float = 0.0  # percent of total host capacity, normalized across logical CPUs
     mem_pct: float = 0.0
     rss: int = 0
     cmd: str = ""

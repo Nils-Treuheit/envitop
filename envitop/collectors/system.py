@@ -2,16 +2,32 @@
 
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import os
 import platform
 import re
 import socket
+import ssl
+import subprocess
 import time
+from pathlib import Path
 from typing import Optional
 
 import psutil
 
-from ..model import CpuInfo, DiskInfo, MemInfo, MountInfo, NetInfo, ProcInfo
+from ..model import (
+    CpuInfo,
+    DiskInfo,
+    HostedSiteInfo,
+    MemInfo,
+    MountInfo,
+    NetInfo,
+    NetInterfaceInfo,
+    NetListenerInfo,
+    NetProcessInfo,
+    ProcInfo,
+)
 
 
 def _read_first(path: str) -> str:
@@ -22,12 +38,20 @@ def _read_first(path: str) -> str:
         return ""
 
 
+def _endpoint_ip(endpoint: str) -> str:
+    if endpoint.startswith("[") and "]" in endpoint:
+        return endpoint[1:endpoint.index("]")].split("%", 1)[0]
+    host, separator, _port = endpoint.rpartition(":")
+    return (host if separator else endpoint).split("%", 1)[0]
+
+
 class SystemCollector:
     HISTORY = 240
 
     def __init__(self) -> None:
         self._hist_cpu: list[float] = []
         self._hist_cpu_user: list[float] = []
+        self._hist_core: list[list[float]] = []
         self._hist_mem: list[float] = []
         self._hist_swap: list[float] = []
         self._hist_rx: list[float] = []
@@ -35,6 +59,10 @@ class SystemCollector:
         self._hist_read: list[float] = []
         self._hist_write: list[float] = []
         self._last_net: Optional[tuple[int, int, float]] = None
+        self._last_net_if: dict[str, tuple[int, int, float]] = {}
+        self._last_socket_bytes: dict[tuple[int, str, str], tuple[int, int, float]] = {}
+        self._website_status_cache: dict[tuple[int, int, str], Optional[int]] = {}
+        self._website_probe_at = 0.0
         self._last_disk: Optional[tuple[int, int, float]] = None
         self._mounts: list[MountInfo] = []
         self._mount_prev: dict[str, tuple[int, int, float]] = {}
@@ -175,6 +203,14 @@ class SystemCollector:
                 continue
             if usage.total <= 0:
                 continue
+            try:
+                vfs = os.statvfs(mount)
+                inode_total = int(vfs.f_files)
+                inode_used = max(0, inode_total - int(vfs.f_ffree))
+                inode_percent = inode_used / inode_total * 100.0 if inode_total else None
+            except OSError:
+                inode_total = inode_used = 0
+                inode_percent = None
             seen_devices.add(device)
             out.append(
                 MountInfo(
@@ -184,10 +220,14 @@ class SystemCollector:
                     percent=usage.percent,
                     free=usage.free,
                     device=device,
+                    filesystem=part.fstype,
+                    inodes_total=inode_total,
+                    inodes_used=inode_used,
+                    inodes_percent=inode_percent,
                 )
             )
         out.sort(key=lambda m: (-m.total, m.mount))
-        self._mounts = out[:6]
+        self._mounts = out[:32]
         return self._mounts
 
     @staticmethod
@@ -237,6 +277,10 @@ class SystemCollector:
                     write_rate=write_rate,
                     read_history=list(read_history),
                     write_history=list(write_history),
+                    filesystem=mount.filesystem,
+                    inodes_total=mount.inodes_total,
+                    inodes_used=mount.inodes_used,
+                    inodes_percent=mount.inodes_percent,
                 )
             )
         return sampled
@@ -257,6 +301,10 @@ class SystemCollector:
                     cmdline = [cmdline]
                 cmd = " ".join(cmdline)
                 rss = int(getattr(info.get("memory_info"), "rss", 0) or 0)
+                # psutil reports a process using one fully busy logical CPU as
+                # 100%, and multithreaded processes can exceed 100%. Envitop
+                # uses whole-machine capacity instead: divide by logical CPUs
+                # so process CPU stays on the same 0–100% scale as host CPU.
                 cpu_pct = float(info.get("cpu_percent") or 0.0) / self._logical_cpus
                 result.append(
                     ProcInfo(
@@ -278,9 +326,9 @@ class SystemCollector:
                 continue
             except Exception:
                 continue
-        result.sort(key=lambda p: (p.cpu, p.rss), reverse=True)
         index = {p.pid: p for p in result}
         self._proc_index = index
+        result.sort(key=lambda proc: (proc.cpu, proc.mem_pct), reverse=True)
         self._proc_cache = result
         return result[:limit], index
 
@@ -318,6 +366,11 @@ class SystemCollector:
             user_percent = 0.0
         self._hist_cpu_user.append(user_percent)
         self._hist_cpu_user = self._hist_cpu_user[-self.HISTORY:]
+        if len(self._hist_core) != len(cores):
+            self._hist_core = [[] for _ in cores]
+        for history, value in zip(self._hist_core, cores):
+            history.append(value)
+            del history[:-self.HISTORY]
 
         cpu = CpuInfo(
             model_name=self.cpu_model,
@@ -333,6 +386,7 @@ class SystemCollector:
             load15=float(load[2]),
             history=list(self._hist_cpu),
             user_history=list(self._hist_cpu_user),
+            core_history=[list(history) for history in self._hist_core],
         )
 
         mem = psutil.virtual_memory()
@@ -412,7 +466,335 @@ class SystemCollector:
         )
 
         procs, index = self.processes()
+        (
+            net_info.interfaces,
+            net_info.listeners,
+            net_info.websites,
+        ) = self._network_interfaces(index, now)
         return cpu, mem_info, net_info, disk_info, procs, index
+
+    @staticmethod
+    def _route_source_ip(remote_ip: str) -> str:
+        """Ask the kernel which source address it would route from, without sending data."""
+        try:
+            address = ipaddress.ip_address(remote_ip.split("%", 1)[0])
+            family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+            with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                probe.connect((remote_ip, 9))
+                return str(probe.getsockname()[0]).split("%", 1)[0]
+        except (OSError, ValueError):
+            return ""
+
+    @staticmethod
+    def _website_main_file(proc: Optional[ProcInfo]) -> str:
+        if proc is None:
+            return "-"
+        try:
+            cwd = Path(psutil.Process(proc.pid).cwd())
+        except (psutil.Error, OSError):
+            return "-"
+
+        arguments = proc.cmdline or []
+        root: Optional[Path] = None
+        root_flags = ("--directory", "--root", "--root-dir", "--dir", "-d", "-r")
+        for index, argument in enumerate(arguments):
+            for flag in root_flags:
+                if argument == flag and index + 1 < len(arguments):
+                    root = Path(arguments[index + 1]).expanduser()
+                    break
+                if argument.startswith(flag + "="):
+                    root = Path(argument.split("=", 1)[1]).expanduser()
+                    break
+            if root is not None:
+                break
+        if root is not None and not root.is_absolute():
+            root = cwd / root
+        root = root or cwd
+
+        if root.is_file():
+            return str(root)
+        index_files = (
+            "index.html", "public/index.html", "dist/index.html", "build/index.html",
+            "site/index.html", "www/index.html",
+        )
+        for relative in index_files:
+            candidate = root / relative
+            if candidate.is_file():
+                return str(candidate)
+
+        for argument in arguments:
+            match = re.match(r"^([A-Za-z_][\w.]*)\s*:\s*(?:app|application)$", argument)
+            if match:
+                module = root / (match.group(1).replace(".", "/") + ".py")
+                if module.is_file():
+                    return str(module)
+        for relative in (
+            "app.py", "main.py", "server.py", "src/main.py", "src/app.py",
+            "server.js", "index.js", "src/index.js",
+        ):
+            candidate = root / relative
+            if candidate.is_file():
+                return str(candidate)
+        return "-"
+
+    @staticmethod
+    def _probe_local_http_status(host: str, port: int, secure: bool) -> Optional[int]:
+        connection = None
+        try:
+            if secure:
+                context = ssl._create_unverified_context()
+                connection = http.client.HTTPSConnection(host, port, timeout=0.12, context=context)
+            else:
+                connection = http.client.HTTPConnection(host, port, timeout=0.12)
+            connection.request("HEAD", "/", headers={"Host": "localhost", "Connection": "close"})
+            response = connection.getresponse()
+            status = int(response.status)
+            if status in (405, 501):
+                response.close()
+                connection.request(
+                    "GET", "/",
+                    headers={"Host": "localhost", "Connection": "close", "Range": "bytes=0-0"},
+                )
+                response = connection.getresponse()
+                status = int(response.status)
+            return status
+        except (OSError, http.client.HTTPException, ssl.SSLError):
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def _network_interfaces(
+        self, proc_index: dict[int, ProcInfo], now: float
+    ) -> tuple[list[NetInterfaceInfo], list[NetListenerInfo], list[HostedSiteInfo]]:
+        try:
+            counters = psutil.net_io_counters(pernic=True) or {}
+            link_stats = psutil.net_if_stats()
+            addresses = psutil.net_if_addrs()
+        except Exception:
+            return [], [], []
+
+        interfaces: list[NetInterfaceInfo] = []
+        address_map: dict[str, str] = {}
+        for name, entries in addresses.items():
+            for entry in entries:
+                if entry.family in (socket.AF_INET, socket.AF_INET6):
+                    address_map[entry.address.split("%", 1)[0]] = name
+        for name, item in counters.items():
+            rx, tx = int(item.bytes_recv), int(item.bytes_sent)
+            previous = self._last_net_if.get(name)
+            rx_rate = tx_rate = 0.0
+            if previous:
+                old_rx, old_tx, old_time = previous
+                elapsed = max(1e-6, now - old_time)
+                rx_rate = max(0.0, (rx - old_rx) / elapsed)
+                tx_rate = max(0.0, (tx - old_tx) / elapsed)
+            self._last_net_if[name] = (rx, tx, now)
+            stats = link_stats.get(name)
+            speed = float(stats.speed) * 1_000_000 / 8 if stats and stats.speed > 0 else None
+            interfaces.append(NetInterfaceInfo(
+                name=name,
+                rx_rate=rx_rate,
+                tx_rate=tx_rate,
+                total_rx=rx,
+                total_tx=tx,
+                max_rate=speed,
+            ))
+
+        by_name = {item.name: item for item in interfaces}
+        process_connections: dict[str, dict[int, int]] = {}
+        process_rates = self._tcp_process_rates(address_map, now)
+        try:
+            connections = psutil.net_connections(kind="inet")
+        except (psutil.Error, OSError, NotImplementedError):
+            connections = []
+        listeners_by_key: dict[tuple[int, int, str, str], NetListenerInfo] = {}
+        website_candidates: dict[tuple[int, int, str], tuple[ProcInfo, str, str]] = {}
+        common_web_ports = {80, 443, 3000, 3001, 4000, 5000, 5173, 5174, 8000, 8001, 8080, 8081, 8443, 8888}
+        web_process_names = (
+            "nginx", "apache", "httpd", "caddy", "traefik", "uvicorn", "gunicorn", "hypercorn",
+            "flask", "django", "vite", "next", "webpack", "http.server", "php -s", "tomcat",
+        )
+        generic_web_runtime_pattern = re.compile(
+            r"(?:node(?:js)?|python(?:3(?:\.\d+)?)?|ruby(?:\d+(?:\.\d+)?)?|"
+            r"php(?:\d+(?:\.\d+)?)?|java|bun|deno)"
+        )
+        for connection in connections:
+            pid = connection.pid
+            remote = getattr(connection.raddr, "ip", "") or ""
+            if not remote and connection.raddr:
+                remote = str(connection.raddr[0])
+            local = getattr(connection.laddr, "ip", "") or ""
+            local_port = getattr(connection.laddr, "port", 0) or 0
+            if not local and connection.laddr:
+                local = str(connection.laddr[0])
+                if len(connection.laddr) > 1:
+                    local_port = int(connection.laddr[1])
+            local = local.split("%", 1)[0]
+            is_tcp_listener = (
+                connection.type == socket.SOCK_STREAM and connection.status == psutil.CONN_LISTEN
+            )
+            is_udp_listener = connection.type == socket.SOCK_DGRAM and not remote
+            if local_port > 0 and (is_tcp_listener or is_udp_listener):
+                protocol = "TCP" if is_tcp_listener else "UDP"
+                process = proc_index.get(pid) if pid is not None else None
+                process_name = process.name if process else "-"
+                command = process.cmd if process else ""
+                display_address = local or "*"
+                key = (pid or 0, local_port, protocol, display_address)
+                listeners_by_key[key] = NetListenerInfo(
+                    port=local_port,
+                    protocol=protocol,
+                    address=display_address,
+                    pid=pid,
+                    process=process_name,
+                    command=command,
+                )
+                app_signature = f"{process_name} {command}".lower()
+                runtime_name = process_name.lower().split("/", 1)[-1]
+                is_web = is_tcp_listener and (
+                    local_port in common_web_ports
+                    or any(name in app_signature for name in web_process_names)
+                    or generic_web_runtime_pattern.fullmatch(runtime_name) is not None
+                )
+                if is_web and pid is not None:
+                    secure = local_port in (443, 8443) or any(name in app_signature for name in ("https", "ssl", "tls"))
+                    scheme = "https" if secure else "http"
+                    try:
+                        address_ip = ipaddress.ip_address(local) if local else None
+                    except ValueError:
+                        address_ip = None
+                    if address_ip is None or address_ip.is_unspecified:
+                        host = "::1" if local and ":" in local else "127.0.0.1"
+                    else:
+                        host = str(address_ip)
+                    shown_host = f"[{host}]" if ":" in host else host
+                    website_candidates[(pid, local_port, scheme)] = (process, host, f"{scheme}://{shown_host}:{local_port}/")
+                continue
+
+            if pid is None:
+                continue
+            if connection.type == socket.SOCK_STREAM:
+                if connection.status not in (
+                    psutil.CONN_ESTABLISHED,
+                    psutil.CONN_SYN_SENT,
+                    psutil.CONN_SYN_RECV,
+                ):
+                    continue
+            elif connection.type == socket.SOCK_DGRAM:
+                if not remote:
+                    continue
+            else:
+                continue
+            try:
+                if not local or ipaddress.ip_address(local).is_unspecified:
+                    if remote:
+                        local = self._route_source_ip(remote)
+            except ValueError:
+                continue
+            interface = address_map.get(local)
+            if interface not in by_name:
+                continue
+            counts = process_connections.setdefault(interface, {})
+            counts[pid] = counts.get(pid, 0) + 1
+
+        for name, counts in process_connections.items():
+            by_name[name].processes = [
+                NetProcessInfo(
+                    pid,
+                    proc_index[pid].name,
+                    count,
+                    *(process_rates.get((name, pid), (None, None))),
+                )
+                for pid, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+                if pid in proc_index
+            ]
+
+        listeners = sorted(
+            listeners_by_key.values(), key=lambda item: (item.port, item.protocol, item.pid or 0, item.address)
+        )
+        if now >= self._website_probe_at:
+            self._website_probe_at = now + 5.0
+            self._website_status_cache = {
+                key: self._probe_local_http_status(host, key[1], key[2] == "https")
+                for key, (_process, host, _url) in sorted(
+                    website_candidates.items(), key=lambda item: (item[0][1], item[0][0])
+                )[:6]
+            }
+        websites = [
+            HostedSiteInfo(
+                url=url,
+                main_file=self._website_main_file(process),
+                status_code=self._website_status_cache.get(key),
+                pid=key[0],
+                process=process.name,
+            )
+            for key, (process, _host, url) in sorted(
+                website_candidates.items(), key=lambda item: (item[0][1], item[0][0])
+            )
+        ]
+        return interfaces, listeners, websites
+
+    def _tcp_process_rates(
+        self, address_map: dict[str, str], now: float
+    ) -> dict[tuple[str, int], tuple[float, float]]:
+        """Read Linux TCP_INFO byte counters when `ss` exposes them.
+
+        Interface counters remain authoritative. Per-process figures are
+        available only for TCP sockets reported by iproute2; other platforms,
+        UDP sockets, permissions, or older `ss` builds display as unavailable.
+        """
+        if platform.system() != "Linux":
+            self._last_socket_bytes.clear()
+            return {}
+        try:
+            result = subprocess.run(
+                ["ss", "-tinp"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=0.4,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            self._last_socket_bytes.clear()
+            return {}
+        if result.returncode != 0:
+            self._last_socket_bytes.clear()
+            return {}
+
+        blocks = re.split(r"(?m)^(?=ESTAB\s)", result.stdout)
+        current: dict[tuple[int, str, str], tuple[int, int, float]] = {}
+        rates: dict[tuple[str, int], list[float]] = {}
+        for block in blocks:
+            if not block.startswith("ESTAB"):
+                continue
+            pid_match = re.search(r"pid=(\d+)", block)
+            ack_match = re.search(r"\bbytes_acked:(\d+)", block)
+            recv_match = re.search(r"\bbytes_received:(\d+)", block)
+            if not (pid_match and ack_match and recv_match):
+                continue
+            fields = block.splitlines()[0].split()
+            if len(fields) < 5:
+                continue
+            pid = int(pid_match.group(1))
+            local_endpoint, remote_endpoint = fields[3], fields[4]
+            local_ip = _endpoint_ip(local_endpoint)
+            interface = address_map.get(local_ip)
+            if interface is None:
+                continue
+            key = (pid, local_endpoint, remote_endpoint)
+            sent, received = int(ack_match.group(1)), int(recv_match.group(1))
+            previous = self._last_socket_bytes.get(key)
+            current[key] = (sent, received, now)
+            if previous:
+                old_sent, old_received, old_time = previous
+                elapsed = max(1e-6, now - old_time)
+                value = rates.setdefault((interface, pid), [0.0, 0.0])
+                value[0] += max(0, received - old_received) / elapsed
+                value[1] += max(0, sent - old_sent) / elapsed
+        self._last_socket_bytes = current
+        return {key: (value[0], value[1]) for key, value in rates.items()}
 
     def uptime(self) -> float:
         try:

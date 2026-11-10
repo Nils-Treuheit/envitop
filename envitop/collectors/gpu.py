@@ -31,7 +31,7 @@ class GpuCollector:
     QUERY = (
         "index,name,utilization.gpu,memory.used,memory.total,"
         "temperature.gpu,power.draw,power.limit,fan.speed,clocks.sm,clocks.mem,"
-        "pstate"
+        "pstate,utilization.memory"
     )
 
     def __init__(self) -> None:
@@ -100,7 +100,7 @@ class GpuCollector:
                 row = next(csv.reader([line]))
             except Exception:
                 continue
-            if len(row) < 12:
+            if len(row) < 13:
                 continue
             row = [c.strip() for c in row]
             idx = _int(row[0])
@@ -122,6 +122,7 @@ class GpuCollector:
                 clock_sm=_num(row[9]),
                 clock_mem=_num(row[10]),
                 pstate=row[11] or "",
+                mem_util=_num(row[12]),
             )
             hist = self._hist.setdefault(idx, [])
             hist.append(util)

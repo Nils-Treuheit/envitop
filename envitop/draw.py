@@ -456,6 +456,84 @@ def braille_graph(
     return lines
 
 
+def braille_stacked_graph(
+    series: Sequence[Sequence[float]],
+    width: int,
+    height: int,
+    palette: Palette,
+    *,
+    colors: Optional[Sequence[str]] = None,
+    maximum: float = 100.0,
+) -> list[Text]:
+    """Render additive time-series layers in device-specific colors.
+
+    Each input series contains its contribution to the shared 0–maximum scale.
+    The layers stack from the baseline, while each Braille cell uses the color
+    of the device contributing most of its dots.
+    """
+    width = max(1, int(width))
+    height = max(1, int(height))
+    point_count = width * 2
+    layer_count = len(series)
+    if not layer_count:
+        return [Text(" " * width) for _ in range(height)]
+    palette_colors = colors or (palette.green, palette.cyan, palette.yellow, palette.magenta,
+                                palette.blue, palette.orange, palette.red)
+    layer_colors = [palette_colors[i % len(palette_colors)] for i in range(layer_count)]
+    normalized: list[list[float]] = []
+    for source in series:
+        values = [max(0.0, float(value)) for value in source]
+        if len(values) > point_count:
+            count = len(values)
+            values = [
+                max(values[int(i * count / point_count):max(
+                    int(i * count / point_count) + 1,
+                    int((i + 1) * count / point_count),
+                )])
+                for i in range(point_count)
+            ]
+        elif len(values) < point_count:
+            values = [0.0] * (point_count - len(values)) + values
+        normalized.append(values)
+
+    scale = max(float(maximum), 1e-9)
+    dots_h = height * 4
+    masks = [[0] * height for _ in range(width)]
+    color_counts = [[[0] * layer_count for _ in range(height)] for _ in range(width)]
+    for x in range(width):
+        for sub_x in (0, 1):
+            point = x * 2 + sub_x
+            cumulative = 0.0
+            for layer, values in enumerate(normalized):
+                start = int(round(cumulative / scale * dots_h))
+                cumulative += values[point]
+                end = int(round(cumulative / scale * dots_h))
+                for d in range(max(0, start), min(dots_h, end)):
+                    cell_row = height - 1 - d // 4
+                    dot_row = 3 - d % 4
+                    if dot_row == 3:
+                        bit = 0x40 if sub_x == 0 else 0x80
+                    else:
+                        bit = (0x01 if sub_x == 0 else 0x08) << dot_row
+                    masks[x][cell_row] |= bit
+                    color_counts[x][cell_row][layer] += 1
+
+    lines: list[Text] = []
+    for row in range(height):
+        line = Text()
+        for x in range(width):
+            mask = masks[x][row]
+            if not mask:
+                line.append(" ", style=f"on {palette.panel}")
+                continue
+            # Prefer the uppermost occupied layer at a boundary so a small
+            # contribution remains visible as its own color in the stack.
+            layer = max(index for index, dots in enumerate(color_counts[x][row]) if dots)
+            line.append(chr(0x2800 + mask), style=layer_colors[layer])
+        lines.append(line)
+    return lines
+
+
 def braille_line_graph(
     values: Sequence[float],
     width: int,
