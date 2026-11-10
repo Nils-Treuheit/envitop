@@ -7,3 +7,5 @@ dist/
 .pytest_cache/
 .ruff_cache/
 native/target/
+
+target/
