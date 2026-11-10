@@ -1,4 +1,4 @@
-# envitop
+# envitop syswatch
 
 A single terminal dashboard that looks like [btop](https://github.com/aristocratos/btop),
 shows NVIDIA GPUs like [nvitop](https://github.com/XuehaiPan/nvitop), and tracks local AI
