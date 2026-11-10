@@ -177,8 +177,8 @@ class EnviTop(App):
                             yield HistoryGraph(
                                 maximum=100,
                                 color_mode="solid",
-                                primary_role="cyan",
-                                secondary_role="green",
+                                primary_role="dim",
+                                secondary_role="dim",
                                 primary_label="USER CPU",
                                 secondary_label="TOTAL CPU",
                                 id="cpu-graph",
@@ -192,8 +192,8 @@ class EnviTop(App):
                         yield HistoryGraph(
                             maximum=100,
                             color_mode="value",
-                            primary_role="cyan",
-                            secondary_role="magenta",
+                            primary_role="dim",
+                            secondary_role="dim",
                             primary_label="RAM USED",
                             secondary_label="SWAP USED",
                             label_min_height=4,
@@ -981,7 +981,7 @@ class EnviTop(App):
         # Memory.
         mem = snap.mem
         mem_stats = Text()
-        mem_stats.append(f"RAM {human_bytes(mem.used)}/{human_bytes(mem.total)}", style=palette.text)
+        mem_stats.append(f"RAM {human_bytes(mem.used)}/{human_bytes(mem.total)}", style=palette.cyan)
         swap_text = (
             f"SWAP {human_bytes(mem.swap_used)}/{human_bytes(mem.swap_total)}"
             if mem.swap_total

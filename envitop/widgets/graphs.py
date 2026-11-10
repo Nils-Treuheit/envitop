@@ -138,7 +138,9 @@ class HistoryGraph(Widget):
             if show_labels and self.primary_label:
                 label = Text(self.primary_label, style=primary_colour)
                 if self.primary_value is not None:
-                    label.append(f" {self.primary_value:.0f}%", style=f"bold {primary_colour}")
+                    label.append(
+                        f" {self.primary_value:.0f}%", style=f"bold {palette.gradient(self.primary_value)}"
+                    )
                 lines.append(label)
             lines.extend(
                 graph_fn(
@@ -168,7 +170,10 @@ class HistoryGraph(Widget):
             if show_labels and self.secondary_label:
                 label = Text(self.secondary_label, style=secondary_colour)
                 if self.secondary_value is not None:
-                    label.append(f" {self.secondary_value:.0f}%", style=f"bold {secondary_colour}")
+                    label.append(
+                        f" {self.secondary_value:.0f}%",
+                        style=f"bold {palette.gradient(self.secondary_value)}",
+                    )
                 lines.append(label)
             return _join(lines, w, h)
         graph_fn = braille_line_graph if self.graph_style == "line" else braille_graph

@@ -143,7 +143,7 @@ class GpuPanel(Widget):
                 util_label = Text("GPU UTIL", style=palette.dim)
                 util_label.append(f" {gpu.util:.0f}%", style=f"bold {palette.gradient(gpu.util)}")
                 sm_clock = f"{gpu.clock_sm:.0f}MHz" if gpu.clock_sm is not None else ""
-                lines.append(self._right_aligned(util_label, sm_clock, w, palette.faint))
+                lines.append(self._right_aligned(util_label, sm_clock, w, palette.dim))
             graph = braille_graph(
                 smooth_series(gpu.history or [gpu.util]),
                 w,
