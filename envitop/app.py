@@ -7,6 +7,7 @@ import os
 import re
 import time
 from collections import deque
+from contextlib import suppress
 from typing import Optional
 
 from rich.text import Text
@@ -50,7 +51,6 @@ from .widgets import (
     SessionDetail,
     TokenOverview,
 )
-import contextlib
 
 HELP_TEXT = """\
 [b]envitop[/b] — btop + nvitop + abtop in one view
@@ -120,7 +120,7 @@ class HelpScreen(ModalScreen):
         action = self.SCROLL_KEYS.get(event.key)
         if action:
             box = self.query_one("#help-box", VerticalScroll)
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 getattr(box, f"action_{action}")()
             return
         self.dismiss()
@@ -610,7 +610,7 @@ class EnviTop(App):
         palette = get_palette()
         for panel in self.query(".panel"):
             panel.remove_class("active")
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 panel.styles.border = ("round", palette.border)
         ids: list[str] = []
         ids = {
@@ -637,13 +637,13 @@ class EnviTop(App):
     def _apply_theme(self) -> None:
         """Push the active palette into the pieces defined by static CSS."""
         palette = get_palette()
-        with contextlib.suppress(Exception):
+        with suppress(Exception):
             self.screen.styles.background = palette.bg
         for selector in ("#header", "#footer"):
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 self.query_one(selector).styles.background = palette.bg
         for panel in self.query(".panel"):
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 panel.styles.background = palette.panel
         self._update_active_panel()
 
@@ -1011,7 +1011,7 @@ class EnviTop(App):
             self.agent_index = 0
 
         # Header / footer.
-        with contextlib.suppress(Exception):
+        with suppress(Exception):
             self.query_one("#header", Header).update_data(live_snapshot, self.view)
         self.current_insights = diagnose(live_snapshot, list(self.timeline))
         self._update_footer()

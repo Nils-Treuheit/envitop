@@ -725,10 +725,9 @@ class GpuPanel(Widget):
             )
             if show_graph_labels:
                 lines.append(Text("VRAM", style=palette.dim))
-            if gi < n - 1:
+            if gi < n - 1 and this_band <= 2:
                 # Replace the last line with a separator if the band is tiny.
-                if this_band <= 2:
-                    lines.append(Text("─" * w, style=palette.faint))
+                lines.append(Text("─" * w, style=palette.faint))
         return _join(lines, w, h)
 
     @staticmethod

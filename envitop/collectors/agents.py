@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import time
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +27,6 @@ from typing import Any, Iterable, Optional
 import psutil
 
 from ..model import AgentSession, ChildProc, ProcInfo, RateLimit
-import contextlib
 
 HOME = Path.home()
 SUMMARIES_FILE = HOME / ".cache" / "abtop" / "summaries.json"
@@ -34,7 +34,7 @@ CODEX_CACHE = HOME / ".cache" / "abtop" / "codex-rate-limits.json"
 CLAUDE_DIRS = [HOME / ".claude"]
 if os.environ.get("CLAUDE_CONFIG_DIR"):
     CLAUDE_DIRS.insert(0, Path(os.environ["CLAUDE_CONFIG_DIR"]))
-with contextlib.suppress(Exception):
+with suppress(Exception):
     CLAUDE_DIRS.extend(sorted(HOME.glob(".claude-*")))
 
 

@@ -11,6 +11,7 @@ import socket
 import ssl
 import subprocess
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Optional
 
@@ -28,7 +29,6 @@ from ..model import (
     NetProcessInfo,
     ProcInfo,
 )
-import contextlib
 
 
 def _read_first(path: str) -> str:
@@ -95,7 +95,7 @@ class SystemCollector:
             self.kernel = ""
         self.cpu_model = self._cpu_model()
         # Prime psutil's per-core counters so the first visible sample is real.
-        with contextlib.suppress(Exception):
+        with suppress(Exception):
             psutil.cpu_percent(interval=0.05, percpu=True)
 
     # -- helpers ---------------------------------------------------------
