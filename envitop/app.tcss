@@ -48,6 +48,10 @@
     #panel-gpuprocs { height: 1.3fr; }
     #panel-procs { height: 1.45fr; }
     #panel-agents { height: 1.11fr; }
+    #agents-scroll {
+        scrollbar-gutter: stable;
+        scrollbar-size-vertical: 1;
+    }
     #panel-tokens { height: 2.2fr; }
     #panel-detail { height: 2.24fr; }
     #panel-quota { height: 0.6fr; }

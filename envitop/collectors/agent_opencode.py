@@ -62,27 +62,43 @@ class OpenCodeCollector:
         conn = self._connect()
         if conn is None:
             return []
-        try:
-            rows = conn.execute(
-                """
-                SELECT id, title, directory, parent_id, model, cost,
-                       tokens_input, tokens_output, tokens_reasoning,
-                       tokens_cache_read, tokens_cache_write,
-                       time_created, time_updated, version
-                FROM session
-                WHERE time_updated >= ?
-                ORDER BY time_updated DESC
-                LIMIT ?
-                """,
-                (int(cutoff * 1000), limit),
-            ).fetchall()
-        except sqlite3.Error:
-            self._reset()
-            return []
+        rows_by_id: dict[str, tuple[sqlite3.Row, bool]] = {}
+        for table, is_v2 in (("session_v2", True), ("session", False)):
+            if not self._has_table(conn, table):
+                continue
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT id, title, directory, parent_id, model, cost,
+                           tokens_input, tokens_output, tokens_reasoning,
+                           tokens_cache_read, tokens_cache_write,
+                           time_created, time_updated, version
+                    FROM {table}
+                    WHERE time_updated >= ?
+                    ORDER BY time_updated DESC
+                    LIMIT ?
+                    """,
+                    (int(cutoff * 1000), limit),
+                ).fetchall()
+            except sqlite3.Error:
+                self._reset()
+                return []
+            for row in rows:
+                sid = str(row["id"])
+                old = rows_by_id.get(sid)
+                if old is None or int(row["time_updated"] or 0) > int(old[0]["time_updated"] or 0):
+                    rows_by_id[sid] = (row, is_v2)
 
         sessions: list[AgentSession] = []
         now = time.time()
-        for row in rows:
+        rows_by_id = dict(
+            sorted(
+                rows_by_id.items(),
+                key=lambda item: int(item[1][0]["time_updated"] or 0),
+                reverse=True,
+            )[:limit]
+        )
+        for row, is_v2 in rows_by_id.values():
             if row["parent_id"]:
                 continue
             sid = str(row["id"])
@@ -92,7 +108,7 @@ class OpenCodeCollector:
             updated = int(row["time_updated"] or 0) / 1000.0
             created = int(row["time_created"] or 0) / 1000.0
             _last_tokens, context_tokens, last_text, turns, turn_history = self._last_assistant(
-                conn, sid, include_turn_history=(sid == selected_id)
+                conn, sid, is_v2=is_v2, include_turn_history=(sid == selected_id)
             )
             context_window = self._guess_context_window(model)
             context_pct = None
@@ -140,21 +156,37 @@ class OpenCodeCollector:
             )
         return sessions
 
+    @staticmethod
+    def _has_table(conn: sqlite3.Connection, table: str) -> bool:
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone() is not None
+
     def _last_assistant(
         self,
         conn: sqlite3.Connection,
         session_id: str,
         *,
+        is_v2: bool = False,
         include_turn_history: bool = False,
     ) -> tuple[int, int, str, int, list[int]]:
         # Deliberately avoid a LIKE scan over the (often multi-GB) message
         # table: walk the last few rows through the session/time index instead.
         try:
             limit = 256 if include_turn_history else 24
-            rows = conn.execute(
-                "SELECT data FROM message WHERE session_id = ? ORDER BY time_created DESC LIMIT ?",
-                (session_id, limit),
-            ).fetchall()
+            if is_v2:
+                rows = conn.execute(
+                    "SELECT data, type AS role FROM session_message "
+                    "WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+                    (session_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT data, NULL AS role FROM message "
+                    "WHERE session_id = ? ORDER BY time_created DESC LIMIT ?",
+                    (session_id, limit),
+                ).fetchall()
         except sqlite3.Error:
             return 0, 0, "", 0, []
         parsed: list[dict] = []
@@ -164,6 +196,8 @@ class OpenCodeCollector:
             except Exception:
                 continue
             if isinstance(data, dict):
+                if row["role"]:
+                    data["role"] = row["role"]
                 parsed.append(data)
         last_tokens = 0
         context_tokens = 0
@@ -200,8 +234,12 @@ class OpenCodeCollector:
             try:
                 turn_count = int(
                     conn.execute(
-                        "SELECT COUNT(*) FROM message "
-                        "WHERE session_id = ? AND json_extract(data, '$.role') = 'user'",
+                        (
+                            "SELECT COUNT(*) FROM session_message WHERE session_id = ? AND type = 'user'"
+                            if is_v2
+                            else "SELECT COUNT(*) FROM message "
+                            "WHERE session_id = ? AND json_extract(data, '$.role') = 'user'"
+                        ),
                         (session_id,),
                     ).fetchone()[0]
                 )
@@ -228,30 +266,54 @@ class OpenCodeCollector:
         except sqlite3.Error:
             self._reset()
             return [], [], ""
+        if not rows:
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT type AS role, data AS mdata
+                    FROM session_message
+                    WHERE session_id = ?
+                    ORDER BY seq DESC LIMIT 60
+                    """,
+                    (session_id,),
+                ).fetchall()
+            except sqlite3.Error:
+                self._reset()
+                return [], [], ""
         chat: list[tuple[str, str]] = []
         tools: list[tuple[str, str]] = []
         current = ""
         for row in reversed(rows):
             try:
                 mdata = json.loads(row["mdata"])
-                pdata = json.loads(row["pdata"])
+                if "pdata" in row.keys():
+                    parts = [json.loads(row["pdata"])]
+                else:
+                    parts = mdata.get("content") or []
+                    if not isinstance(parts, list):
+                        parts = []
+                    if isinstance(mdata.get("text"), str):
+                        parts = [*parts, {"type": "text", "text": mdata["text"]}]
             except Exception:
                 continue
-            role = mdata.get("role")
-            ptype = pdata.get("type")
-            if ptype == "text" and pdata.get("text"):
-                text = redact(str(pdata["text"]), 180)
-                if role in ("user", "assistant") and text:
-                    chat.append(("you" if role == "user" else "ai", text))
-            elif ptype == "tool":
-                name = str(pdata.get("tool") or pdata.get("name") or "tool")
-                state = pdata.get("state") or {}
-                inp = state.get("input") if isinstance(state, dict) else None
-                arg = redact(str(inp), 90) if inp else ""
-                tools.append((name, arg))
-                status = state.get("status") if isinstance(state, dict) else ""
-                if status in ("running", "pending"):
-                    current = f"{name} {arg}".strip()
+            role = row["role"] if "role" in row.keys() else mdata.get("role")
+            for pdata in parts:
+                if not isinstance(pdata, dict):
+                    continue
+                ptype = pdata.get("type")
+                if ptype == "text" and pdata.get("text"):
+                    text = redact(str(pdata["text"]), 180)
+                    if role in ("user", "assistant") and text:
+                        chat.append(("you" if role == "user" else "ai", text))
+                elif ptype in ("tool", "tool-call"):
+                    name = str(pdata.get("tool") or pdata.get("name") or "tool")
+                    state = pdata.get("state") or {}
+                    inp = state.get("input") if isinstance(state, dict) else None
+                    arg = redact(str(inp), 90) if inp else ""
+                    tools.append((name, arg))
+                    status = state.get("status") if isinstance(state, dict) else ""
+                    if status in ("running", "pending"):
+                        current = f"{name} {arg}".strip()
         return chat[-6:], tools[-8:], current
 
     @staticmethod
