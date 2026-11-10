@@ -30,11 +30,10 @@
     #panel-cpu { height: 2.6fr; }
     #cpu-content { height: 1fr; }
     #cpu-top-row { height: 1fr; min-height: 4; }
-    #cpu-core-scroll { height: 1fr; min-height: 4; overflow-y: auto; }
-    #panel-cpu-aggregate { height: 1fr; min-width: 18; }
+    #cpu-core-area { height: 1fr; min-height: 4; }
     #cpu-top-procs { height: 1fr; min-height: 3; }
     #panel-mem { height: 1.4fr; }
-    #memory-content { height: 3.05fr; }
+    #memory-content { height: 1.4fr; }
     #memory-lower { height: 1.65fr; }
     #panel-filesystems { height: 1fr; }
     #panel-net { height: 1.15fr; }
@@ -43,20 +42,20 @@
     #panel-websites { min-width: 38; }
     #panel-listeners { min-width: 32; }
     #panel-disk { height: 1.65fr; }
-    #panel-gpu { height: 2.5fr; }
+    #panel-gpu { height: 1fr; }
     #gpu-top { height: 2.5fr; }
     #panel-gpu-stats { width: 1fr; min-width: 28; }
     #panel-gpuprocs { height: 1.3fr; }
     #panel-procs { height: 1.45fr; }
-    #panel-agents { height: 1.85fr; }
-    #panel-tokens { height: 2.0fr; }
-    #panel-detail { height: 1.3fr; }
-    #panel-quota { height: 1.0fr; }
+    #panel-agents { height: 1.11fr; }
+    #panel-tokens { height: 2.2fr; }
+    #panel-detail { height: 2.24fr; }
+    #panel-quota { height: 0.6fr; }
     #cpu-graph { width: 1fr; height: 1.5fr; min-height: 2; }
     #cpu-cores { width: 1fr; height: 1fr; min-height: 3; }
     #agent-content { height: 1fr; }
-    #agents-row-top { height: 3.85fr; }
-    #agents-row-bottom { height: 2.3fr; }
+    #agents-row-top { height: 3.31fr; }
+    #agents-row-bottom { height: 2.84fr; }
     #proc-summary { height: 1; }
     #net-details { height: 1fr; }
     #footer {
@@ -80,4 +79,3 @@
         color: #d6e2ea;
         overflow-y: auto;
     }
-    

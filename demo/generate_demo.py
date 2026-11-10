@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 FPS = 24
 FRAMES_PER_TAB = 48
-SIZE = (160, 50)
-PNG_SIZE = (960, 600)
+SIZE = (240, 50)
+PNG_SIZE = (1200, 500)
 TABS = (
     ("overview", "Overview"),
     ("cpu", "CPU"),

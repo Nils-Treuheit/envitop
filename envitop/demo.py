@@ -68,7 +68,9 @@ class DemoSource:
 
     @staticmethod
     def _signals(t: float) -> tuple[float, ...]:
-        pulse = lambda divisor, power, phase=0: max(0.0, math.sin(t / divisor + phase)) ** power
+        def pulse(divisor: float, power: int, phase: float = 0) -> float:
+            return max(0.0, math.sin(t / divisor + phase)) ** power
+
         cpu = 42 + 22 * math.sin(t / 6.8) + 12 * math.sin(t / 2.1) + 8 * math.sin(t / 0.95)
         gpu = 54 + 27 * math.sin(t / 8) + 17 * math.sin(t / 2.3) + 16 * pulse(11, 10)
         rx = 0.6 + 6 * pulse(4.1, 1.6) + 3 * pulse(1.5, 4, 0.8)
@@ -130,6 +132,7 @@ class DemoSource:
 
         cpu = CpuInfo(
             percent=cpu_total,
+            user_percent=cpu_total * 0.65,
             per_core=cores,
             freq_mhz=4820,
             temp_c=63,
@@ -137,6 +140,7 @@ class DemoSource:
             load5=3.71,
             load15=3.22,
             history=list(self._cpu_hist),
+            user_history=[value * 0.65 for value in self._cpu_hist],
         )
         mem = MemInfo(
             total=64 * GB,

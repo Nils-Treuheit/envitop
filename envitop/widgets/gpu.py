@@ -15,7 +15,6 @@ from ..draw import (
     get_palette,
     human_bytes,
     smooth_series,
-    tiny_bar,
 )
 from ..model import (
     GpuState,
@@ -43,6 +42,15 @@ class GpuPanel(Widget):
             self.focused = focused
         self.state = state
         self.refresh()
+
+    @staticmethod
+    def _right_aligned(left: Text, right: str, width: int, style: str) -> Text:
+        right = clip(right, width)
+        right_width = cell_len(right)
+        left.truncate(max(0, width - right_width - 1), overflow="crop")
+        left.append(" " * max(0, width - left.cell_len - right_width))
+        left.append(right, style=style)
+        return _pad_text(left, width)
 
     def render(self) -> Text:
         palette = get_palette()
@@ -94,14 +102,13 @@ class GpuPanel(Widget):
         band = max(4, h // n) if n else h
         for gi, gpu in enumerate(state.gpus):
             this_band = band if gi < n - 1 else max(2, h - band * (n - 1))
-            stats_lines = 2 if this_band >= 5 else 1
+            stats_lines = 2
             show_graph_labels = this_band >= 8
             show_divider = this_band - stats_lines - (2 if show_graph_labels else 0) >= 3
             graph_h = max(
                 1,
                 this_band - stats_lines - (2 if show_graph_labels else 0) - int(show_divider),
             )
-            util_colour = palette.gradient(gpu.util)
             title = Text()
             title.append(f"GPU{gpu.index} ", style=f"bold {palette.accent}")
             name_w = max(8, min(w // 3, 22))
@@ -109,18 +116,12 @@ class GpuPanel(Widget):
                 clip(gpu.name.replace("NVIDIA ", ""), name_w),
                 style=f"bold {palette.text}",
             )
-            title.append("  ")
-            title.append(f"{gpu.util:3.0f}%", style=f"bold {util_colour}")
+            title.append(f"  {gpu.pstate or 'P—'}", style=palette.faint)
 
             def add(part: str, style: str) -> None:
                 if title.cell_len + cell_len(part) <= w:
                     title.append(part, style=style)
 
-            if state.driver or state.cuda:
-                version = "  Driver " + (state.driver or "—")
-                if state.cuda:
-                    version += " | CUDA " + state.cuda
-                add(version, palette.dim)
             if gpu.temp_c is not None:
                 add(f"  {gpu.temp_c:.0f}°C", palette.text)
             if gpu.power_w is not None:
@@ -130,35 +131,21 @@ class GpuPanel(Widget):
                 add(f"  {pwr}", palette.dim)
             if gpu.fan_pct is not None and gpu.fan_pct > 0:
                 add(f"  FAN {gpu.fan_pct:.0f}%", palette.dim)
-            if gpu.clock_sm:
-                add(f"  {gpu.clock_sm:.0f}MHz", palette.dim)
-            if gpu.pstate:
-                add(f"  {gpu.pstate}", palette.faint)
             lines.append(_pad_text(title, w))
-
-            if stats_lines == 2:
-                vram = f"{human_bytes(gpu.mem_used)}/{human_bytes(gpu.mem_total)}"
-                prefix = _line([("VRAM ", palette.dim)], 5)
-                suffix_text = f" {gpu.mem_percent:3.0f}%  {vram}"
-                suffix_width = min(cell_len(suffix_text), max(0, w - prefix.cell_len))
-                bar_width = max(0, w - prefix.cell_len - suffix_width)
-                bar = tiny_bar(gpu.mem_percent, max(1, bar_width), palette)
-                suffix = _line([(suffix_text, palette.dim)], suffix_width)
-                row = Text()
-                row.append_text(prefix)
-                if bar_width:
-                    row.append_text(bar)
-                row.append_text(suffix)
-                row.truncate(w, overflow="crop")
-                lines.append(row)
+            lines.append(
+                _line([(f"Driver {state.driver or '—'}   CUDA {state.cuda or '—'}", palette.dim)], w)
+            )
 
             # Match nvitop's paired utilization and memory history regions.
             perf_h = max(1, graph_h // 2)
             mem_h = max(1, graph_h - perf_h)
             if show_graph_labels:
-                lines.append(Text("GPU UTIL", style=palette.dim))
+                util_label = Text("GPU UTIL", style=palette.dim)
+                util_label.append(f" {gpu.util:.0f}%", style=f"bold {palette.gradient(gpu.util)}")
+                sm_clock = f"{gpu.clock_sm:.0f}MHz" if gpu.clock_sm is not None else ""
+                lines.append(self._right_aligned(util_label, sm_clock, w, palette.faint))
             graph = braille_graph(
-                smooth_series(gpu.history),
+                smooth_series(gpu.history or [gpu.util]),
                 w,
                 perf_h,
                 palette,
@@ -170,7 +157,7 @@ class GpuPanel(Widget):
                 lines.append(Text("─" * w, style=palette.faint))
             lines.extend(
                 braille_graph(
-                    smooth_series(gpu.mem_history),
+                    smooth_series(gpu.mem_history or [gpu.mem_percent]),
                     w,
                     mem_h,
                     palette,
@@ -179,7 +166,17 @@ class GpuPanel(Widget):
                 )
             )
             if show_graph_labels:
-                lines.append(Text("VRAM", style=palette.dim))
+                vram_label = Text("VRAM ", style=palette.dim)
+                vram_label.append(
+                    f"{gpu.mem_percent:.0f}%", style=f"bold {palette.gradient(gpu.mem_percent)}"
+                )
+                bandwidth = ""
+                if gpu.clock_mem is not None:
+                    bandwidth += f" · MBW @ {gpu.clock_mem:.0f}MHz"
+                bandwidth += f" {gpu.mem_util:.0f}%" if gpu.mem_util is not None else " —%"
+                vram_label.append(bandwidth, style=palette.faint)
+                used_total = f"{human_bytes(gpu.mem_used)}/{human_bytes(gpu.mem_total)}"
+                lines.append(self._right_aligned(vram_label, used_total, w, palette.dim))
             if gi < n - 1 and this_band <= 2:
                 # Replace the last line with a separator if the band is tiny.
                 lines.append(Text("─" * w, style=palette.faint))

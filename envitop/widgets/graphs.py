@@ -71,6 +71,7 @@ class HistoryGraph(Widget):
         primary_label: str = "",
         secondary_label: str = "",
         secondary_invert: bool = False,
+        label_min_height: int = 5,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -85,6 +86,9 @@ class HistoryGraph(Widget):
         self.primary_label = primary_label
         self.secondary_label = secondary_label
         self.secondary_invert = secondary_invert
+        self.label_min_height = label_min_height
+        self.primary_value: Optional[float] = None
+        self.secondary_value: Optional[float] = None
 
     def update_data(
         self,
@@ -92,6 +96,8 @@ class HistoryGraph(Widget):
         maximum: Optional[float] = None,
         secondary: Optional[Iterable[float]] = None,
         secondary_maximum: Optional[float] = None,
+        primary_value: Optional[float] = None,
+        secondary_value: Optional[float] = None,
     ) -> None:
         self.values = smooth_series(list(values))
         if secondary is not None:
@@ -99,6 +105,8 @@ class HistoryGraph(Widget):
         if maximum is not None:
             self.maximum = maximum
         self.secondary_maximum = secondary_maximum
+        self.primary_value = primary_value
+        self.secondary_value = secondary_value
         self.refresh()
 
     def _combined_max(self) -> Optional[float]:
@@ -115,11 +123,11 @@ class HistoryGraph(Widget):
         h = max(1, self.size.height)
         if self.secondary and h >= 2:
             maximum = self._combined_max()
-            show_labels = h >= 5 and (self.primary_label or self.secondary_label)
-            show_divider = h >= 3
+            show_labels = h >= self.label_min_height and (self.primary_label or self.secondary_label)
             label_rows = int(show_labels and bool(self.primary_label)) + int(
                 show_labels and bool(self.secondary_label)
             )
+            show_divider = h - label_rows >= 3
             graph_height = h - label_rows - int(show_divider)
             top_h = max(1, graph_height // 2)
             bottom_h = max(1, graph_height - top_h)
@@ -128,7 +136,10 @@ class HistoryGraph(Widget):
             graph_fn = braille_line_graph if self.graph_style == "line" else braille_graph
             lines: list[Text] = []
             if show_labels and self.primary_label:
-                lines.append(Text(self.primary_label, style=primary_colour))
+                label = Text(self.primary_label, style=primary_colour)
+                if self.primary_value is not None:
+                    label.append(f" {self.primary_value:.0f}%", style=f"bold {primary_colour}")
+                lines.append(label)
             lines.extend(
                 graph_fn(
                     self.values,
@@ -155,7 +166,10 @@ class HistoryGraph(Widget):
                 )
             )
             if show_labels and self.secondary_label:
-                lines.append(Text(self.secondary_label, style=secondary_colour))
+                label = Text(self.secondary_label, style=secondary_colour)
+                if self.secondary_value is not None:
+                    label.append(f" {self.secondary_value:.0f}%", style=f"bold {secondary_colour}")
+                lines.append(label)
             return _join(lines, w, h)
         graph_fn = braille_line_graph if self.graph_style == "line" else braille_graph
         lines = graph_fn(self.values, w, h, palette, maximum=self.maximum, color_by=self.color_mode)
@@ -179,6 +193,22 @@ class CoreBars(Widget):
         self.histories: list[list[float]] = []
         self.temp_source = ""
         self.detailed = False
+
+    def _overview_groups(self, width: int, height: int):
+        """Aggregate only as much as needed to fit every core in the grid."""
+        count = len(self.cores)
+        rows = max(1, height - 1)
+        label_width = len(f"C{max(0, count - 4)}-{count - 1}")
+        cell_width = max(14, label_width + 9)
+        columns = max(1, width // (cell_width + 1))
+        group_size = max(1, (count + columns * rows - 1) // (columns * rows))
+        groups = []
+        for start in range(0, count, group_size):
+            end = min(count, start + group_size)
+            values = self.cores[start:end]
+            temps = [value for value in self.temperatures[start:end] if value is not None]
+            groups.append((start, end, sum(values) / len(values), max(temps) if temps else None))
+        return groups, columns, cell_width
 
     def update_data(
         self,
@@ -229,31 +259,25 @@ class CoreBars(Widget):
                 line.append("  ")
                 lines.append(_pad_text(line, w))
             return _join(lines, w, h)
-        cell = 14
-        cols = max(1, w // cell)
-        rows_needed = (len(cores) + cols - 1) // cols
+        groups, cols, cell = self._overview_groups(w, h)
         temp_label = "CCD" if self.temp_source.upper() == "CCD" else "TMP"
         header = Text()
+        cell_core_width = cell - 9
         for _ in range(cols):
-            header.append(f"{'CORE':<4} {'%':>4} {temp_label:<3} ", style=palette.dim)
+            header.append(f"{'CORE':<{cell_core_width}} {'%':>4} {temp_label:<3} ", style=palette.dim)
         lines: list[Text] = [header]
-        for row in range(min(max(0, h - 1), rows_needed)):
+        for row in range(min(max(0, h - 1), (len(groups) + cols - 1) // cols)):
             line = Text()
             for col in range(cols):
-                idx = row * cols + col
-                if idx >= len(cores):
-                    line.append(" " * cell)
+                group_idx = row * cols + col
+                if group_idx >= len(groups):
+                    line.append(" " * (cell + 1))
                     continue
-                pct = cores[idx]
-                temp = self.temperatures[idx] if idx < len(self.temperatures) else None
+                start, end, pct, temp = groups[group_idx]
                 temp_text = f"{temp:.0f}°" if temp is not None else ""
-                line.append(f"C{idx:<3}", style=palette.dim)
-                line.append(" ")
+                core_label = f"C{start}" if end == start + 1 else f"C{start}-{end - 1}"
+                line.append(f"{core_label:<{cell_core_width}} ", style=palette.dim)
                 line.append(f"{pct:3.0f}%", style=f"bold {palette.gradient(pct)}")
-                line.append(" ")
-                line.append(temp_text, style=palette.orange if temp is not None else palette.dim)
-                padding = cell - 4 - 1 - 4 - 1 - len(temp_text)
-                if padding > 0:
-                    line.append(" " * padding)
+                line.append(f" {temp_text:>3} ", style=palette.orange if temp is not None else palette.dim)
             lines.append(_pad_text(line, w))
         return _join(lines, w, h)

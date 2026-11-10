@@ -44,6 +44,9 @@ class AgentTable(Widget):
         self.selected = selected
         self.token_rate = token_rate
         self.scope = scope
+        height = max(3, len(sessions) + 2)
+        if self.styles.height != height:
+            self.styles.height = height
         self.refresh()
 
     def _summary(self, width: int) -> Text:

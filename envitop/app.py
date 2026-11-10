@@ -172,18 +172,17 @@ class EnviTop(App):
                     yield OneLine(id="cpu-stats")
                     with Vertical(id="cpu-content"):
                         with Horizontal(id="cpu-top-row"):
-                            with VerticalScroll(id="cpu-core-scroll"):
+                            with Vertical(id="cpu-core-area"):
                                 yield CoreBars(id="cpu-cores")
-                            with Vertical(id="panel-cpu-aggregate", classes="cpu-aggregate"):
-                                yield HistoryGraph(
-                                    maximum=100,
-                                    color_mode="value",
-                                    primary_role="green",
-                                    secondary_role="cyan",
-                                    primary_label="USER CPU",
-                                    secondary_label="TOTAL CPU",
-                                    id="cpu-graph",
-                                )
+                            yield HistoryGraph(
+                                maximum=100,
+                                color_mode="solid",
+                                primary_role="cyan",
+                                secondary_role="green",
+                                primary_label="USER CPU",
+                                secondary_label="TOTAL CPU",
+                                id="cpu-graph",
+                            )
                         with Vertical(id="panel-cpu-top-procs", classes="panel"):
                             yield CpuTopProcesses(id="cpu-top-procs")
                 with Vertical(id="memory-content"):
@@ -193,17 +192,13 @@ class EnviTop(App):
                         yield HistoryGraph(
                             maximum=100,
                             color_mode="value",
-                            primary_role="magenta",
-                            secondary_role="cyan",
+                            primary_role="cyan",
+                            secondary_role="magenta",
                             primary_label="RAM USED",
                             secondary_label="SWAP USED",
+                            label_min_height=4,
                             id="mem-graph",
                         )
-                    with Horizontal(id="memory-lower"):
-                        with Vertical(id="panel-disk", classes="panel"):
-                            yield DiskPanel(id="disk-panel")
-                        with Vertical(id="panel-filesystems", classes="panel"):
-                            yield FilesystemPanel(id="filesystem-panel")
                 with Vertical(id="panel-net", classes="panel"):
                     yield OneLine(id="net-stats")
                     yield HistoryGraph(
@@ -222,6 +217,11 @@ class EnviTop(App):
                             yield HostedSitesPanel(id="hosted-sites")
                         with Vertical(id="panel-listeners", classes="panel"):
                             yield ListeningPortsPanel(id="listening-ports")
+                with Horizontal(id="memory-lower"):
+                    with Vertical(id="panel-disk", classes="panel"):
+                        yield DiskPanel(id="disk-panel")
+                    with Vertical(id="panel-filesystems", classes="panel"):
+                        yield FilesystemPanel(id="filesystem-panel")
             with Vertical(id="col-mid", classes="col"):
                 with Horizontal(id="gpu-top"):
                     with Vertical(id="panel-gpu", classes="panel"):
@@ -237,14 +237,16 @@ class EnviTop(App):
                 with Vertical(id="agent-content"):
                     with Vertical(id="agents-row-top"):
                         with Vertical(id="panel-agents", classes="panel"):
-                            yield AgentTable(id="agents")
+                            with VerticalScroll(id="agents-scroll"):
+                                yield AgentTable(id="agents")
                         with Vertical(id="panel-tokens", classes="panel"):
                             yield TokenOverview(id="tokens")
                     with Vertical(id="agents-row-bottom"):
                         with Vertical(id="panel-detail", classes="panel"):
                             yield SessionDetail(id="detail")
                         with Vertical(id="panel-quota", classes="panel"):
-                            yield QuotaPanel(id="quota")
+                            with VerticalScroll(id="quota-scroll"):
+                                yield QuotaPanel(id="quota")
                         with Vertical(id="panel-ports", classes="panel"):
                             yield AgentPortsPanel(id="agent-ports")
         yield Footer(id="footer")
@@ -253,7 +255,6 @@ class EnviTop(App):
         titles = {
             "panel-cpu": " CPU ",
             "panel-cpu-top-procs": " CPU PROCESSES ",
-            "panel-cpu-aggregate": " AGGREGATED CPU MONITOR ",
             "panel-mem": " MEMORY ",
             "panel-net": " NETWORK ",
             "panel-net-interfaces": " INTERFACES / PROCESS I/O ",
@@ -321,7 +322,6 @@ class EnviTop(App):
         tab_panels = {
             "overview": [
                 "panel-cpu",
-                "panel-cpu-aggregate",
                 "panel-mem",
                 "panel-net",
                 "panel-disk",
@@ -331,7 +331,7 @@ class EnviTop(App):
                 "panel-detail",
                 "panel-quota",
             ],
-            "cpu": ["panel-cpu", "panel-cpu-aggregate", "panel-cpu-top-procs"],
+            "cpu": ["panel-cpu", "panel-cpu-top-procs"],
             "gpu": ["panel-gpu", "panel-gpu-stats", "panel-gpuprocs"],
             "net": ["panel-net", "panel-net-interfaces", "panel-websites", "panel-listeners"],
             "memory": ["panel-mem", "panel-disk", "panel-filesystems"],
@@ -339,18 +339,13 @@ class EnviTop(App):
             "agents": panels["agents"],
         }
         visible = set(tab_panels.get(self.view, tab_panels["overview"]))
-        aggregate_panel = self.query_one("#panel-cpu-aggregate")
-        if self.view == "cpu":
-            aggregate_panel.add_class("panel")
-        else:
-            aggregate_panel.remove_class("panel")
         self.query_one("#panel-procs").border_title = (
             " CPU PROCESSES " if self.view == "overview" else " PROCESSES + GPU "
         )
         # Keep Overview legible at small widths; every subsystem remains one
         # key away in its dedicated tab.
         if self.view == "overview" and self.narrow:
-            visible = {"panel-cpu", "panel-cpu-aggregate", "panel-mem", "panel-net", "panel-disk"}
+            visible = {"panel-cpu", "panel-mem", "panel-net", "panel-disk"}
             if self.focus_area == "agents":
                 visible.update(("panel-agents", "panel-tokens", "panel-detail", "panel-quota"))
             elif self.focus_area == "gpuprocs":
@@ -363,7 +358,6 @@ class EnviTop(App):
             col.styles.height = "1fr"
         for panel_id in (
             "panel-cpu",
-            "panel-cpu-aggregate",
             "panel-cpu-top-procs",
             "panel-mem",
             "panel-net",
@@ -398,12 +392,10 @@ class EnviTop(App):
         self.query_one("#mem-extra").styles.display = "block" if self.view == "memory" else "none"
         self.query_one("#cpu-top-row").styles.layout = "horizontal"
         self.query_one("#cpu-top-row").styles.height = "1fr"
-        self.query_one("#panel-cpu-aggregate").styles.layout = "vertical"
-        self.query_one("#panel-cpu-aggregate").styles.display = "block"
-        self.query_one("#panel-cpu-aggregate").styles.height = "1fr"
-        self.query_one("#panel-cpu-aggregate").styles.margin_left = 0
-        self.query_one("#cpu-core-scroll").styles.width = "1fr"
-        self.query_one("#panel-cpu-aggregate").styles.width = "1fr"
+        core_area = self.query_one("#cpu-core-area")
+        core_area.styles.width = "1fr"
+        core_area.styles.height = "1fr"
+        core_area.styles.min_height = 4
         self.query_one("#cpu-graph").styles.display = "block"
         self.query_one("#cpu-graph").styles.height = "1.5fr"
         self.query_one("#cpu-top-procs").styles.display = "block" if self.view == "cpu" else "none"
@@ -416,18 +408,17 @@ class EnviTop(App):
         if self.view == "overview":
             for panel_id, height in (
                 ("panel-cpu", "2.6fr"),
-                ("memory-content", "3.05fr"),
-                ("panel-mem", "1.4fr"),
+                ("memory-content", "1.4fr"),
+                ("panel-mem", "1fr"),
                 ("memory-lower", "1.65fr"),
                 ("panel-disk", "1fr"),
                 ("panel-net", "1.15fr"),
-                ("panel-gpu", "2.5fr"),
                 ("panel-gpuprocs", "1.3fr"),
                 ("panel-procs", "1.45fr"),
-                ("panel-agents", "1.85fr"),
-                ("panel-tokens", "2fr"),
-                ("panel-detail", "1.3fr"),
-                ("panel-quota", "1fr"),
+                ("panel-agents", "1.11fr"),
+                ("panel-tokens", "2.2fr"),
+                ("panel-detail", "2.24fr"),
+                ("panel-quota", "0.6fr"),
             ):
                 self.query_one(f"#{panel_id}").styles.height = height
         # Focused pages rearrange their subsystem panels around the available
@@ -438,10 +429,9 @@ class EnviTop(App):
         self.query_one("#cpu-top-row").styles.layout = "vertical"
         self.query_one("#cpu-cores").styles.width = "1fr"
         self.query_one("#cpu-graph").styles.width = "1fr"
-        self.query_one("#panel-cpu-aggregate").styles.width = "1fr"
         self.query_one("#cpu-cores").styles.height = "1fr"
         self.query_one("#memory-lower").styles.layout = "vertical"
-        self.query_one("#panel-mem").styles.height = "1.4fr"
+        self.query_one("#panel-mem").styles.height = "1fr"
         self.query_one("#memory-lower").styles.height = "1.65fr"
         self.query_one("#panel-disk").styles.width = "1fr"
         self.query_one("#panel-filesystems").styles.width = "1fr"
@@ -456,14 +446,10 @@ class EnviTop(App):
         )
         self.query_one("#agents-row-top").styles.layout = "vertical"
         self.query_one("#agents-row-bottom").styles.layout = "vertical"
-        self.query_one("#agents-row-top").styles.height = "3.85fr"
-        self.query_one("#agents-row-bottom").styles.height = "2.3fr"
+        self.query_one("#agents-row-top").styles.height = "3.31fr"
+        self.query_one("#agents-row-bottom").styles.height = "2.84fr"
         for panel_id in ("panel-agents", "panel-tokens", "panel-detail", "panel-quota", "panel-ports"):
             self.query_one(f"#{panel_id}").styles.width = "1fr"
-        if self.view == "overview" and width >= 116:
-            self.query_one("#cpu-top-row").styles.layout = "horizontal"
-            self.query_one("#cpu-core-scroll").styles.width = "1.1fr"
-            self.query_one("#panel-cpu-aggregate").styles.width = "1fr"
         if self.view == "cpu":
             self.query_one("#cpu-content").styles.layout = "vertical"
             self.query_one("#cpu-top-row").styles.layout = "horizontal"
@@ -473,18 +459,16 @@ class EnviTop(App):
                 else 24
             )
             self.query_one("#cpu-top-row").styles.height = core_count + 1
-            self.query_one("#cpu-core-scroll").styles.height = "1fr"
-            self.query_one("#cpu-core-scroll").styles.width = "1fr"
+            core_area.styles.height = "1fr"
+            core_area.styles.min_height = 4
+            core_area.styles.width = "1fr"
             self.query_one("#cpu-cores").styles.width = "1fr"
-            self.query_one("#panel-cpu-aggregate").styles.height = "1fr"
-            self.query_one("#panel-cpu-aggregate").styles.width = "0.43fr"
-            self.query_one("#panel-cpu-aggregate").styles.margin_left = 1
             self.query_one("#cpu-graph").styles.height = "1fr"
             self.query_one("#panel-cpu-top-procs").styles.height = "1fr"
             self.query_one("#cpu-top-procs").styles.height = "1fr"
         if self.view == "memory":
-            self.query_one("#memory-content").styles.height = "1fr"
-            self.query_one("#panel-mem").styles.height = "1.15fr"
+            self.query_one("#memory-content").styles.height = "1.15fr"
+            self.query_one("#panel-mem").styles.height = "1fr"
             self.query_one("#memory-lower").styles.height = "2fr"
             if width >= 130:
                 self.query_one("#memory-lower").styles.layout = "horizontal"
@@ -522,6 +506,29 @@ class EnviTop(App):
                 self.query_one("#panel-ports").styles.width = "1.2fr"
         self._update_active_panel()
         self._update_footer()
+        self.call_after_refresh(self._fit_overview_panels)
+
+    def _fit_overview_panels(self) -> None:
+        """Fit responsive overview panels to their rendered space."""
+        if self.view != "overview":
+            return
+        core_area = self.query_one("#cpu-core-area")
+        count = len(self._last_snapshot.cpu.per_core) if self._last_snapshot else 24
+        columns = max(1, core_area.size.width // 16)
+        rows = 2 if columns <= 3 else (count + columns - 1) // columns
+        available = self.query_one("#cpu-top-row").size.height
+        height = min(rows + 1, max(3, available - 5))
+        if core_area.styles.height != height:
+            core_area.styles.height = height
+            core_area.styles.min_height = 1
+        top_height = self.query_one("#agents-row-top").size.height
+        bottom_height = self.query_one("#agents-row-bottom").size.height
+        agent_height = min(7, max(5, top_height - 3))
+        quota_height = min(5, max(4, bottom_height - 8))
+        self.query_one("#panel-agents").styles.height = agent_height
+        self.query_one("#panel-tokens").styles.height = "1fr"
+        self.query_one("#panel-detail").styles.height = "1fr"
+        self.query_one("#panel-quota").styles.height = quota_height
 
     def _update_active_panel(self) -> None:
         palette = get_palette()
@@ -937,8 +944,6 @@ class EnviTop(App):
         cpu = snap.cpu
         cpu_widget = self.query_one("#cpu-stats", OneLine)
         cpu_right = Text()
-        cpu_right.append(f"CPU {cpu.percent:4.0f}%", style=f"bold {palette.gradient(cpu.percent)}")
-        cpu_right.append(f"  USER {cpu.user_percent:4.0f}%", style=f"bold {palette.cyan}")
         if cpu.temp_c is not None:
             cpu_right.append(f"  {cpu.temp_c:.0f}°C", style=palette.orange)
         cpu_right.append(
@@ -955,7 +960,11 @@ class EnviTop(App):
         cpu_stats.append_text(cpu_right)
         cpu_widget.update_text(cpu_stats)
         self.query_one("#cpu-graph", HistoryGraph).update_data(
-            cpu.user_history, maximum=100, secondary=cpu.history
+            cpu.user_history,
+            maximum=100,
+            secondary=cpu.history,
+            primary_value=cpu.user_percent,
+            secondary_value=cpu.percent,
         )
         self.query_one("#cpu-cores", CoreBars).update_data(
             cpu.per_core,
@@ -965,21 +974,27 @@ class EnviTop(App):
             detailed=self.view == "cpu",
         )
         self.query_one("#cpu-top-procs", CpuTopProcesses).update_data(snap.procs)
-        self.query_one("#panel-cpu").border_subtitle = f" {cpu.percent:.0f}% "
+        self.query_one("#panel-cpu").border_subtitle = (
+            "" if self.view == "overview" else f" {cpu.percent:.0f}% "
+        )
 
         # Memory.
         mem = snap.mem
         mem_stats = Text()
-        mem_stats.append(f"{mem.percent:5.1f}%", style=f"bold {palette.gradient(mem.percent)}")
-        mem_stats.append(f"  {human_bytes(mem.used)} / {human_bytes(mem.total)}", style=palette.text)
+        mem_stats.append(f"RAM {human_bytes(mem.used)}/{human_bytes(mem.total)}", style=palette.text)
         swap_text = (
             f"SWAP {human_bytes(mem.swap_used)}/{human_bytes(mem.swap_total)}"
             if mem.swap_total
             else "SWAP off"
         )
-        mem_stats.append(f"  {swap_text}", style=palette.magenta)
-        mem_stats.append(f"  avail {human_bytes(mem.available)}", style=palette.dim)
-        mem_stats.append(f"  cached {human_bytes(mem.cached)}", style=palette.blue)
+        mem_stats.append(f" {swap_text}", style=palette.magenta)
+        mem_stats.append(f" Cached {human_bytes(mem.cached)}", style=palette.blue)
+        stats_width = self.query_one("#mem-stats", OneLine).size.width
+        if not stats_width:
+            stats_width = max(0, self.size.width // 3 - 4)
+        available_text = f"  available {human_bytes(mem.available)} RAM"
+        if stats_width and mem_stats.cell_len + len(available_text) <= stats_width:
+            mem_stats.append(available_text, style=palette.faint)
         self.query_one("#mem-stats", OneLine).update_text(mem_stats)
         mem_extra = Text()
         mem_extra.append(f"USED {human_bytes(mem.used)}", style=palette.text)
@@ -992,10 +1007,17 @@ class EnviTop(App):
             style=palette.magenta,
         )
         self.query_one("#mem-extra", OneLine).update_text(mem_extra)
+        swap_percent = mem.swap_percent if mem.swap_total else 0.0
         self.query_one("#mem-graph", HistoryGraph).update_data(
-            mem.history, maximum=100, secondary=mem.swap_history
+            mem.history or [mem.percent],
+            maximum=100,
+            secondary=mem.swap_history or [swap_percent],
+            primary_value=mem.percent,
+            secondary_value=swap_percent,
         )
-        self.query_one("#panel-mem").border_subtitle = f" {mem.percent:.0f}% "
+        self.query_one("#panel-mem").border_subtitle = (
+            "" if self.view == "overview" else f" {mem.percent:.0f}% "
+        )
 
         # Network.
         net = snap.net
@@ -1007,7 +1029,11 @@ class EnviTop(App):
         net_stats.append(
             f"  total {human_bytes(net.total_rx)} / {human_bytes(net.total_tx)}", style=palette.faint
         )
-        self.query_one("#net-stats", OneLine).update_text(net_stats)
+        net_stats_widget = self.query_one("#net-stats", OneLine)
+        stats_width = net_stats_widget.size.width or max(0, self.query_one("#panel-net").size.width - 4)
+        aligned_stats = Text(" " * max(0, stats_width - net_stats.cell_len))
+        aligned_stats.append_text(net_stats)
+        net_stats_widget.update_text(aligned_stats)
         recent_rx = smooth_series(net.rx_history[-60:] or [1])
         recent_tx = smooth_series(net.tx_history[-60:] or [1])
         max_rx = max(max(recent_rx), 1) * 1.1
@@ -1021,7 +1047,7 @@ class EnviTop(App):
         self.query_one("#net-details", NetDetailPanel).update_data(net)
         self.query_one("#hosted-sites", HostedSitesPanel).update_data(net.websites)
         self.query_one("#listening-ports", ListeningPortsPanel).update_data(net.listeners)
-        self.query_one("#panel-net").border_subtitle = f" ↓{human_bytes(net.rx_rate)}/s "
+        self.query_one("#panel-net").border_subtitle = f" ↓  {human_bytes(net.rx_rate)}/s "
 
         # Disk.
         disk = snap.disk
@@ -1033,7 +1059,7 @@ class EnviTop(App):
         self.query_one("#gpu-panel", GpuPanel).update_data(snap.gpu, focused=self.view == "gpu")
         self.query_one("#gpu-stats", GpuStatsPanel).update_data(snap.gpu)
         if snap.gpu.gpus:
-            if self.view == "gpu":
+            if self.view in ("overview", "gpu"):
                 self.query_one("#panel-gpu").border_subtitle = ""
             elif len(snap.gpu.gpus) == 1:
                 g = snap.gpu.gpus[0]
@@ -1044,6 +1070,8 @@ class EnviTop(App):
                 self.query_one(
                     "#panel-gpu"
                 ).border_subtitle = f" avg {snap.gpu.aggregate_util:.0f}% · VRAM {snap.gpu.aggregate_mem_percent:.0f}%{temp_text} "
+        elif self.view == "overview":
+            self.query_one("#panel-gpu").border_subtitle = ""
         else:
             self.query_one("#panel-gpu").border_subtitle = " n/a "
 

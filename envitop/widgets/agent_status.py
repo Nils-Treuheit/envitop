@@ -105,6 +105,9 @@ class QuotaPanel(Widget):
 
     def update_data(self, quotas: list[RateLimit]) -> None:
         self.quotas = quotas
+        height = max(2, 2 * len(quotas))
+        if self.styles.height != height:
+            self.styles.height = height
         self.refresh()
 
     def render(self) -> Text:
@@ -122,11 +125,6 @@ class QuotaPanel(Widget):
                 ("5h", quota.five_pct, quota.five_reset),
                 ("7d", quota.seven_pct, quota.seven_reset),
             ):
-                if pct is None:
-                    continue
-                bar_w = max(5, min(18, w - 26))
-                if w < 34:
-                    bar_w = max(4, w - 20)
                 reset_txt = ""
                 if reset:
                     remaining = reset - time.time()
@@ -141,9 +139,15 @@ class QuotaPanel(Widget):
                 line = Text()
                 for val, style in parts:
                     line.append(val, style=style)
-                line.append_text(pct_bar(pct, bar_w, palette))
-                line.append(f" {pct:3.0f}%", style=palette.dim)
-                line.append(reset_txt, style=palette.faint)
+                if pct is None:
+                    line.append("— no data", style=palette.faint)
+                else:
+                    bar_w = max(5, min(18, w - 26))
+                    if w < 34:
+                        bar_w = max(4, w - 20)
+                    line.append_text(pct_bar(pct, bar_w, palette))
+                    line.append(f" {pct:3.0f}%", style=palette.dim)
+                    line.append(reset_txt, style=palette.faint)
                 if time.time() - (quota.updated_at or 0) > 120:
                     line.append(" stale", style=palette.faint)
                 line.truncate(w, overflow="crop")
