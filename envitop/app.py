@@ -1223,6 +1223,7 @@ class EnviTop(App):
                 for session in snap.agents
                 if session.status in ("thinking", "executing", "waiting")
             ],
+            show_host_usage=self.view == "gpu",
         )
         self.query_one("#procs", ProcTable).update_data(
             procs,

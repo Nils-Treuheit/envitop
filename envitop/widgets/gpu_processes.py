@@ -30,8 +30,11 @@ class GpuProcTable(Widget):
         self.selected = 0
         self.gpu_totals: dict[int, int] = {}
         self.active_projects: list[str] = []
+        self.show_host_usage = False
 
-    def update_data(self, processes, selected: int, gpus=(), active_projects=()) -> None:
+    def update_data(
+        self, processes, selected: int, gpus=(), active_projects=(), *, show_host_usage=False
+    ) -> None:
         next_processes = list(processes)
         next_totals = {gpu.index: gpu.mem_total for gpu in gpus}
         next_projects = list(active_projects)
@@ -40,12 +43,14 @@ class GpuProcTable(Widget):
             and self.selected == selected
             and self.gpu_totals == next_totals
             and self.active_projects == next_projects
+            and self.show_host_usage == show_host_usage
         ):
             return
         self.processes = next_processes
         self.selected = selected
         self.gpu_totals = next_totals
         self.active_projects = next_projects
+        self.show_host_usage = show_host_usage
         self.refresh()
 
     def render(self) -> Text:
@@ -55,7 +60,7 @@ class GpuProcTable(Widget):
         if h <= 1:
             return Text("GPU processes", style=palette.dim)
         lines: list[Text] = []
-        remaining = max(0, w - 56)
+        remaining = max(0, w - (56 if self.show_host_usage else 44))
         natural_process_width = max(
             8,
             max((cell_len(proc.name or "?") for proc in self.processes), default=8),
@@ -82,20 +87,29 @@ class GpuProcTable(Widget):
             (" ", palette.dim),
             (f"{'T':>1}", palette.dim),
             (" ", palette.dim),
-            (f"{'CPU%':>5}", palette.dim),
-            (" ", palette.dim),
-            (f"{'RAM%':>5}", palette.dim),
-            (" ", palette.dim),
-            (f"{'SM%':>3}", palette.dim),
-            (" ", palette.dim),
-            (f"{'GMBW%':>5}", palette.dim),
-            (" ", palette.dim),
-            (f"{'VRAM':>9}", palette.dim),
-            (" ", palette.dim),
-            (f"{'TIME':>8}", palette.dim),
-            (" ", palette.dim),
-            (f"{'PROCESS':<{process_width}}", palette.dim),
         ]
+        if self.show_host_usage:
+            header.extend(
+                [
+                    (f"{'CPU%':>5}", palette.dim),
+                    (" ", palette.dim),
+                    (f"{'RAM%':>5}", palette.dim),
+                    (" ", palette.dim),
+                ]
+            )
+        header.extend(
+            [
+                (f"{'SM%':>3}", palette.dim),
+                (" ", palette.dim),
+                (f"{'GMBW%':>5}", palette.dim),
+                (" ", palette.dim),
+                (f"{'VRAM':>9}", palette.dim),
+                (" ", palette.dim),
+                (f"{'TIME':>8}", palette.dim),
+                (" ", palette.dim),
+                (f"{'PROCESS':<{process_width}}", palette.dim),
+            ]
+        )
         if show_details:
             header.extend(
                 [
@@ -143,20 +157,29 @@ class GpuProcTable(Widget):
                 (" ", ""),
                 (f"{proc.kind:>1}", palette.magenta if proc.kind == "G" else palette.green),
                 (" ", ""),
-                (f"{cpu:>5}", _process_usage_color(proc.cpu_pct, palette)),
-                (" ", ""),
-                (f"{ram:>5}", _process_usage_color(proc.host_mem_pct, palette)),
-                (" ", ""),
-                (f"{sm:>3}", _process_usage_color(proc.sm, palette)),
-                (" ", ""),
-                (f"{gmbw:>5}", _process_usage_color(proc.gmbw_pct, palette)),
-                (" ", ""),
-                (f"{vram:>9}", _process_usage_color(vram_use, palette)),
-                (" ", ""),
-                (f"{runtime:>8}", palette.dim),
-                (" ", ""),
-                (f"{clip(proc.name, process_width):<{process_width}}", palette.text),
             ]
+            if self.show_host_usage:
+                parts.extend(
+                    [
+                        (f"{cpu:>5}", _process_usage_color(proc.cpu_pct, palette)),
+                        (" ", ""),
+                        (f"{ram:>5}", _process_usage_color(proc.host_mem_pct, palette)),
+                        (" ", ""),
+                    ]
+                )
+            parts.extend(
+                [
+                    (f"{sm:>3}", _process_usage_color(proc.sm, palette)),
+                    (" ", ""),
+                    (f"{gmbw:>5}", _process_usage_color(proc.gmbw_pct, palette)),
+                    (" ", ""),
+                    (f"{vram:>9}", _process_usage_color(vram_use, palette)),
+                    (" ", ""),
+                    (f"{runtime:>8}", palette.dim),
+                    (" ", ""),
+                    (f"{clip(proc.name, process_width):<{process_width}}", palette.text),
+                ]
+            )
             if show_details:
                 details = _gpu_process_details(proc, self.active_projects)
                 parts.extend(
